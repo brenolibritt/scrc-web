@@ -2,13 +2,12 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Plus, Trash2, Pencil, Check, X, Fuel, Truck, Users, Building2,
   Gauge, ClipboardList, LayoutDashboard, AlertTriangle, Save,
-  ChevronDown, Search, Droplets, Warehouse, Lock, Unlock, Eye
+  ChevronDown, Search, Droplets, Warehouse, Lock, Unlock, Eye, Settings
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer
 } from "recharts";
-import { storageGet, storageSet } from "./lib/storage.js";
 
 /* ---------------------------------------------------------------------
    TOKENS
@@ -72,7 +71,7 @@ const fmtMins = (mins) => {
   return `${h}h${String(m).padStart(2, "0")}`;
 };
 
-function computeCarga(row, veiculos) {
+function computeCarga(row, veiculos, config) {
   const pesoLiquido = num(row.pesoBruto) - num(row.drenagem) - num(row.tara);
   const densidade = num(row.densidade);
   const volumeComBSW = densidade > 0 ? pesoLiquido / densidade : 0;
@@ -80,24 +79,31 @@ function computeCarga(row, veiculos) {
   const bswL = volumeComBSW * bswFrac;
   const volumeLiquido = volumeComBSW - bswL;
   const ofertado = num(row.ofertado);
-  const divergencia = ofertado - volumeLiquido;
-  const divergenciaAlta = ofertado > 0 && Math.abs(divergencia) > 0.02 * ofertado;
-  const custoUnit = num(row.custoUnit);
-  const fi = num(row.fi);
+
+  // Divergência: pode ser calculada em Litros ou em Kg, conforme configuração.
+  const unidade = config?.unidadeDivergencia || "L";
+  const divergencia = unidade === "KG"
+    ? (ofertado * densidade) - (pesoLiquido * (1 - bswFrac))
+    : ofertado - volumeLiquido;
+
+  const limite = num(config?.limiteDivergencia ?? 100);
+  const alertaLigado = config?.alertaDivergencia !== false;
+  const divergenciaAlta = alertaLigado && Math.abs(divergencia) > limite;
+
+  const custoUnit = num(row.custoUnit); // já inclui qualquer componente interno (ex: FI)
   const frete = num(row.frete);
-  const valorTotal = volumeLiquido * custoUnit + volumeLiquido * fi + volumeLiquido * frete;
+  const valorTotal = volumeComBSW * (custoUnit + frete);
   const tp = tempoPatio(row.chegada, row.saida);
 
   const veic = veiculos.find(
     (v) => v.placa.trim().toUpperCase() === (row.placa || "").trim().toUpperCase()
   );
   const placaCadastrada = !!veic;
-  const motorista = row.placa ? (veic ? veic.motorista : "PLACA NÃO CADASTRADA") : "";
-  const fornecedor = row.placa ? (veic ? veic.fornecedor : "PLACA NÃO CADASTRADA") : "";
+  const transportadora = row.placa ? (veic ? veic.transportadora : "PLACA NÃO CADASTRADA") : "";
 
   return {
     pesoLiquido, volumeComBSW, bswL, volumeLiquido, divergencia, divergenciaAlta,
-    valorTotal, tempoMin: tp, motorista, fornecedor, placaCadastrada,
+    valorTotal, tempoMin: tp, transportadora, placaCadastrada, unidadeDivergencia: unidade,
   };
 }
 
@@ -107,48 +113,65 @@ const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 // Peça pra trocar essa senha por outra a qualquer momento.
 const ADMIN_PASSWORD = "admin123";
 
+const STATUS_OPTIONS = ["PENDENTE", "RECEBIDO", "EM ANÁLISE", "CANCELADO"];
+
 const STATUS_STYLE = {
   PENDENTE: { fg: C.yellow, bg: C.yellowBg },
-  "CONCLUÍDO": { fg: C.green, bg: C.greenBg },
+  "RECEBIDO": { fg: C.green, bg: C.greenBg },
   CANCELADO: { fg: C.red, bg: C.redBg },
+  "EM ANÁLISE": { fg: C.steel, bg: "#1B2530" },
 };
 
 const emptyForm = {
-  data: "", chegada: "", saida: "", placa: "", notaFiscal: "", produto: "",
+  data: "", chegada: "", saida: "", placa: "", motorista: "", notaFiscal: "", fornecedor: "", produto: "",
   api: "", ofertado: "", pesoBruto: "", drenagem: "0", tara: "", densidade: "",
-  bsw: "", tanque: "", custoUnit: "", fi: "0,15", frete: "", status: "PENDENTE",
+  bsw: "", tanque: "", custoUnit: "", frete: "", status: "PENDENTE",
   observacoes: "", lote: "",
+};
+
+const SEED_CONFIG = {
+  produtoPadrao: "Petróleo Bruto",
+  aplicarProdutoPadrao: true,
+  statusPadrao: "PENDENTE",
+  unidadeDivergencia: "L", // "L" ou "KG"
+  limiteDivergencia: 100,
+  alertaDivergencia: true,
 };
 
 const SEED_CADASTROS = {
   motoristas: [
-    { id: uid(), nome: "Joaquim Bulhões", telefone: "71 98806-5169", status: "ATIVO" },
-    { id: uid(), nome: "Matheus Lopes", telefone: "71 98806-9080", status: "ATIVO" },
-    { id: uid(), nome: "Alexandro Brito", telefone: "75 98805-9899", status: "ATIVO" },
+    { id: uid(), nome: "Edmundo do Amaral Pereira", telefone: "", status: "ATIVO" },
+    { id: uid(), nome: "Edmundo do Amaral Pereira Junior", telefone: "", status: "ATIVO" },
+    { id: uid(), nome: "Jeremias Vital Rafael Filho", telefone: "", status: "ATIVO" },
+    { id: uid(), nome: "Jusivaldo de Aquino Carneiro", telefone: "", status: "ATIVO" },
+    { id: uid(), nome: "Nelson Guedes da Silva", telefone: "", status: "ATIVO" },
   ],
   fornecedores: [
-    { id: uid(), nome: "Slim Métrica", cnpj: "", status: "ATIVO" },
-    { id: uid(), nome: "Patrus Gases", cnpj: "", status: "ATIVO" },
-    { id: uid(), nome: "Librit Soluções", cnpj: "", status: "ATIVO" },
+    { id: uid(), nome: "EPG Brasil LTDA", cnpj: "", status: "ATIVO" },
+    { id: uid(), nome: "Magellan Energia e Participações LTDA", cnpj: "", status: "ATIVO" },
+    { id: uid(), nome: "Nova Petróleo - Alagoinhas", cnpj: "", status: "ATIVO" },
+    { id: uid(), nome: "Slim / Geopar - Geosol Participações", cnpj: "", status: "ATIVO" },
   ],
   veiculos: [
-    { id: uid(), placa: "FHI5B15", motorista: "Joaquim Bulhões", fornecedor: "Slim Métrica", status: "ATIVO" },
-    { id: uid(), placa: "XRB6C20", motorista: "Matheus Lopes", fornecedor: "Patrus Gases", status: "ATIVO" },
-    { id: uid(), placa: "JSD5265/OLA2E43", motorista: "Alexandro Brito", fornecedor: "Librit Soluções", status: "ATIVO" },
+    { id: uid(), placa: "IPD7G85 / KXW4B75", transportadora: "EPG Brasil LTDA", observacoes: "", status: "ATIVO" },
+    { id: uid(), placa: "IPG7G85 / KXW4B75", transportadora: "Magellan Energia e Participações LTDA", observacoes: "", status: "ATIVO" },
+    { id: uid(), placa: "JSD5265 / OLA2E43", transportadora: "Nova Petróleo - Alagoinhas", observacoes: "", status: "ATIVO" },
+    { id: uid(), placa: "JSD5265 / OUS3160", transportadora: "Slim / Geopar - Geosol Participações", observacoes: "", status: "ATIVO" },
+    { id: uid(), placa: "LKX5116 / LPR8H44", transportadora: "", observacoes: "", status: "ATIVO" },
   ],
   produtos: [
-    { id: uid(), nome: "Petróleo", unidade: "L", status: "ATIVO" },
-    { id: uid(), nome: "Diesel", unidade: "L", status: "ATIVO" },
-    { id: uid(), nome: "Gás Natural", unidade: "L", status: "ATIVO" },
     { id: uid(), nome: "Petróleo Bruto", unidade: "L", status: "ATIVO" },
   ],
   tanques: [
-    { id: uid(), nome: "YP03", capacidade: "60000", produto: "Diesel", status: "ATIVO" },
-    { id: uid(), nome: "YP04", capacidade: "60000", produto: "Diesel", status: "ATIVO" },
-    { id: uid(), nome: "TQ-02", capacidade: "100000", produto: "Diesel", status: "ATIVO" },
-    { id: uid(), nome: "TQ-07", capacidade: "20000", produto: "Gás Natural", status: "ATIVO" },
+    { id: uid(), nome: "TQ - 0104", capacidade: "60000", produto: "Petróleo Bruto", status: "ATIVO" },
   ],
 };
+
+const CODIGO_PREFIXO = { fornecedores: "FOR", motoristas: "MOT", veiculos: "VEI", produtos: "PRO", tanques: "TAN" };
+function codigoCadastro(sub, list, row) {
+  const idx = list.findIndex((r) => r.id === row.id);
+  return `${CODIGO_PREFIXO[sub]}${String(idx + 1).padStart(3, "0")}`;
+}
 
 /* ---------------------------------------------------------------------
    SMALL UI PRIMITIVES
@@ -293,6 +316,7 @@ export default function App() {
   const [tab, setTab] = useState("historico");
   const [cargas, setCargas] = useState([]);
   const [cadastros, setCadastros] = useState(SEED_CADASTROS);
+  const [config, setConfig] = useState(SEED_CONFIG);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -303,19 +327,30 @@ export default function App() {
     setTimeout(() => setToast(null), 2600);
   }, []);
 
+  useEffect(() => {
+    if (!isAdmin && tab === "config") setTab("historico");
+  }, [isAdmin, tab]);
+
   // load
   useEffect(() => {
     (async () => {
       try {
-        const c = await storageGet("scrc_cargas");
+        const c = await window.storage.get("scrc_cargas", true);
         if (c && c.value) setCargas(JSON.parse(c.value));
       } catch (e) { /* no data yet */ }
       try {
-        const r = await storageGet("scrc_cadastros");
+        const r = await window.storage.get("scrc_cadastros", true);
         if (r && r.value) setCadastros(JSON.parse(r.value));
-        else await storageSet("scrc_cadastros", JSON.stringify(SEED_CADASTROS));
+        else await window.storage.set("scrc_cadastros", JSON.stringify(SEED_CADASTROS), true);
       } catch (e) {
-        try { await storageSet("scrc_cadastros", JSON.stringify(SEED_CADASTROS)); } catch (_) {}
+        try { await window.storage.set("scrc_cadastros", JSON.stringify(SEED_CADASTROS), true); } catch (_) {}
+      }
+      try {
+        const cfg = await window.storage.get("scrc_config", true);
+        if (cfg && cfg.value) setConfig({ ...SEED_CONFIG, ...JSON.parse(cfg.value) });
+        else await window.storage.set("scrc_config", JSON.stringify(SEED_CONFIG), true);
+      } catch (e) {
+        try { await window.storage.set("scrc_config", JSON.stringify(SEED_CONFIG), true); } catch (_) {}
       }
       setLoading(false);
     })();
@@ -324,14 +359,21 @@ export default function App() {
   const persistCargas = useCallback(async (next) => {
     setCargas(next);
     try {
-      await storageSet("scrc_cargas", JSON.stringify(next));
+      await window.storage.set("scrc_cargas", JSON.stringify(next), true);
     } catch (e) { showToast("Não consegui salvar. Verifique a conexão com o banco de dados.", "err"); }
   }, [showToast]);
 
   const persistCadastros = useCallback(async (next) => {
     setCadastros(next);
     try {
-      await storageSet("scrc_cadastros", JSON.stringify(next));
+      await window.storage.set("scrc_cadastros", JSON.stringify(next), true);
+    } catch (e) { showToast("Não consegui salvar. Verifique a conexão com o banco de dados.", "err"); }
+  }, [showToast]);
+
+  const persistConfig = useCallback(async (next) => {
+    setConfig(next);
+    try {
+      await window.storage.set("scrc_config", JSON.stringify(next), true);
     } catch (e) { showToast("Não consegui salvar. Verifique a conexão com o banco de dados.", "err"); }
   }, [showToast]);
 
@@ -345,6 +387,7 @@ export default function App() {
     { id: "historico", label: "Histórico", icon: ClipboardList },
     { id: "painel", label: "Painel Resumo", icon: LayoutDashboard },
     { id: "cadastros", label: "Cadastros", icon: Warehouse },
+    ...(isAdmin ? [{ id: "config", label: "Configurações", icon: Settings }] : []),
   ];
 
   if (loading) {
@@ -461,6 +504,7 @@ export default function App() {
           isAdmin ? (
             <LancarCarga
               cadastros={cadastros}
+              config={config}
               onSave={(row) => {
                 persistCargas([...cargas, { ...row, id: uid() }]);
                 showToast("Carga registrada.");
@@ -472,14 +516,18 @@ export default function App() {
           <Historico
             cargas={cargas}
             cadastros={cadastros}
+            config={config}
             isAdmin={isAdmin}
             onDelete={(id) => { persistCargas(cargas.filter((c) => c.id !== id)); showToast("Registro excluído."); }}
             onUpdate={(row) => { persistCargas(cargas.map((c) => (c.id === row.id ? row : c))); showToast("Registro atualizado."); }}
           />
         )}
-        {tab === "painel" && <PainelResumo cargas={cargas} cadastros={cadastros} />}
+        {tab === "painel" && <PainelResumo cargas={cargas} cadastros={cadastros} config={config} />}
         {tab === "cadastros" && (
-          <Cadastros cadastros={cadastros} cargas={cargas} isAdmin={isAdmin} onSave={persistCadastros} />
+          <Cadastros cadastros={cadastros} cargas={cargas} isAdmin={isAdmin} onSave={persistCadastros} config={config} />
+        )}
+        {tab === "config" && isAdmin && (
+          <Configuracoes config={config} cadastros={cadastros} onSave={(next) => { persistConfig(next); showToast("Configurações salvas."); }} />
         )}
       </div>
 
@@ -555,14 +603,20 @@ function ReadOnlyNotice({ text, onEnter }) {
 /* ---------------------------------------------------------------------
    TAB: LANÇAR CARGA
 --------------------------------------------------------------------- */
-function LancarCarga({ cadastros, onSave }) {
-  const [form, setForm] = useState(emptyForm);
+function LancarCarga({ cadastros, config, onSave }) {
+  const [form, setForm] = useState(() => ({
+    ...emptyForm,
+    produto: config.aplicarProdutoPadrao ? config.produtoPadrao : "",
+    status: config.statusPadrao || "PENDENTE",
+  }));
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  const calc = useMemo(() => computeCarga(form, cadastros.veiculos), [form, cadastros.veiculos]);
+  const calc = useMemo(() => computeCarga(form, cadastros.veiculos, config), [form, cadastros.veiculos, config]);
 
   const produtosAtivos = cadastros.produtos.filter((p) => p.status === "ATIVO");
   const tanquesAtivos = cadastros.tanques.filter((t) => t.status === "ATIVO");
+  const motoristasAtivos = cadastros.motoristas.filter((m) => m.status === "ATIVO");
+  const fornecedoresAtivos = cadastros.fornecedores.filter((f) => f.status === "ATIVO");
 
   const requiredOk = form.data && form.placa && form.produto && form.tanque &&
     form.ofertado && form.pesoBruto && form.tara && form.densidade;
@@ -570,7 +624,11 @@ function LancarCarga({ cadastros, onSave }) {
   const submit = () => {
     if (!requiredOk) return;
     onSave(form);
-    setForm(emptyForm);
+    setForm({
+      ...emptyForm,
+      produto: config.aplicarProdutoPadrao ? config.produtoPadrao : "",
+      status: config.statusPadrao || "PENDENTE",
+    });
   };
 
   return (
@@ -586,18 +644,28 @@ function LancarCarga({ cadastros, onSave }) {
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
-            <Field label="Placa carreta" required hint={form.placa && !calc.placaCadastrada ? "Placa não cadastrada" : " "}>
-              <Input list="placas" value={form.placa} onChange={set("placa")} placeholder="ABC1D23" style={form.placa && !calc.placaCadastrada ? { borderColor: C.red } : {}} />
-              <datalist id="placas">
-                {cadastros.veiculos.map((v) => <option key={v.id} value={v.placa} />)}
-              </datalist>
+            <Field label="Placa carreta" required hint={form.placa && !calc.placaCadastrada ? "Placa não cadastrada" : (calc.transportadora ? `Transportadora: ${calc.transportadora}` : " ")}>
+              <Select value={form.placa} onChange={set("placa")}>
+                <option value="">Selecione…</option>
+                {cadastros.veiculos.filter((v) => v.status === "ATIVO").map((v) => <option key={v.id} value={v.placa}>{v.placa}</option>)}
+              </Select>
             </Field>
             <Field label="Nota fiscal"><Input value={form.notaFiscal} onChange={set("notaFiscal")} placeholder="NF-000" /></Field>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
-            <Field label="Motorista (automático)"><Input disabled value={calc.motorista} style={{ opacity: 0.7 }} /></Field>
-            <Field label="Fornecedor (automático)"><Input disabled value={calc.fornecedor} style={{ opacity: 0.7 }} /></Field>
+            <Field label="Motorista">
+              <Select value={form.motorista} onChange={set("motorista")}>
+                <option value="">Selecione…</option>
+                {motoristasAtivos.map((m) => <option key={m.id} value={m.nome}>{m.nome}</option>)}
+              </Select>
+            </Field>
+            <Field label="Fornecedor">
+              <Select value={form.fornecedor} onChange={set("fornecedor")}>
+                <option value="">Selecione…</option>
+                {fornecedoresAtivos.map((f) => <option key={f.id} value={f.nome}>{f.nome}</option>)}
+              </Select>
+            </Field>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
@@ -622,9 +690,8 @@ function LancarCarga({ cadastros, onSave }) {
             <Field label="BS&W (%)" hint="ex: 1,2 para 1,2%"><Input type="number" step="0.01" value={form.bsw} onChange={set("bsw")} /></Field>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
-            <Field label="Custo unitário (R$/L)"><Input type="number" step="0.01" value={form.custoUnit} onChange={set("custoUnit")} /></Field>
-            <Field label="FI (R$/L)"><Input type="number" step="0.01" value={form.fi} onChange={set("fi")} /></Field>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
+            <Field label="Custo unitário (R$/L)" hint="já deve incluir qualquer componente interno"><Input type="number" step="0.01" value={form.custoUnit} onChange={set("custoUnit")} /></Field>
             <Field label="Frete (R$/L)"><Input type="number" step="0.01" value={form.frete} onChange={set("frete")} /></Field>
           </div>
 
@@ -637,9 +704,7 @@ function LancarCarga({ cadastros, onSave }) {
             </Field>
             <Field label="Status">
               <Select value={form.status} onChange={set("status")}>
-                <option value="PENDENTE">Pendente</option>
-                <option value="CONCLUÍDO">Concluído</option>
-                <option value="CANCELADO">Cancelado</option>
+                {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
               </Select>
             </Field>
           </div>
@@ -671,8 +736,8 @@ function LancarCarga({ cadastros, onSave }) {
           <PreviewRow label="BS&W" value={fmtL(calc.bswL)} />
           <PreviewRow label="Volume líquido" value={fmtL(calc.volumeLiquido)} accent />
           <PreviewRow
-            label="Divergência"
-            value={`${calc.divergencia >= 0 ? "+" : ""}${calc.divergencia.toLocaleString("pt-BR", { maximumFractionDigits: 0 })} L`}
+            label={`Divergência (${calc.unidadeDivergencia})`}
+            value={`${calc.divergencia >= 0 ? "+" : ""}${calc.divergencia.toLocaleString("pt-BR", { maximumFractionDigits: 0 })} ${calc.unidadeDivergencia}`}
             warn={calc.divergenciaAlta}
           />
           <PreviewRow label="Tempo no pátio" value={fmtMins(calc.tempoMin)} />
@@ -686,7 +751,7 @@ function LancarCarga({ cadastros, onSave }) {
           }}>
             <AlertTriangle size={15} color={C.yellow} style={{ flexShrink: 0, marginTop: 1 }} />
             <span style={{ fontSize: 12.5, color: C.yellow }}>
-              Divergência acima de 2% do volume ofertado na nota fiscal.
+              Divergência acima do limite configurado ({config.limiteDivergencia} {config.unidadeDivergencia}).
             </span>
           </div>
         )}
@@ -706,6 +771,7 @@ function LancarCarga({ cadastros, onSave }) {
   );
 }
 
+
 function PreviewRow({ label, value, accent, warn, big }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
@@ -723,7 +789,7 @@ function PreviewRow({ label, value, accent, warn, big }) {
 /* ---------------------------------------------------------------------
    TAB: HISTÓRICO
 --------------------------------------------------------------------- */
-function Historico({ cargas, cadastros, isAdmin, onDelete, onUpdate }) {
+function Historico({ cargas, cadastros, config, isAdmin, onDelete, onUpdate }) {
   const [monthFilter, setMonthFilter] = useState("todos");
   const [query, setQuery] = useState("");
 
@@ -778,7 +844,7 @@ function Historico({ cargas, cadastros, isAdmin, onDelete, onUpdate }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 1000 }}>
             <thead>
               <tr style={{ background: C.panelAlt }}>
-                {["Data","Placa","Motorista","Produto","Ofertado","Líquido","Divergência","Custo Total","Pátio","Status","NF", isAdmin ? "" : null].filter((h) => h !== null).map((h) => (
+                {["Data","Placa","Motorista","Fornecedor","Produto","Ofertado","Líquido","Divergência","Custo Total","Pátio","Status","NF", isAdmin ? "" : null].filter((h) => h !== null).map((h) => (
                   <th key={h} style={{
                     textAlign: "left", padding: "9px 12px", fontSize: 10.5, letterSpacing: "0.06em",
                     textTransform: "uppercase", color: C.textDim, borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap",
@@ -788,7 +854,7 @@ function Historico({ cargas, cadastros, isAdmin, onDelete, onUpdate }) {
             </thead>
             <tbody>
               {filtered.map((row) => {
-                const calc = computeCarga(row, cadastros.veiculos);
+                const calc = computeCarga(row, cadastros.veiculos, config);
                 const dup = row.notaFiscal && nfCounts[row.notaFiscal] > 1;
                 const missing = !row.tanque || !row.produto || !row.placa;
                 const st = STATUS_STYLE[row.status] || STATUS_STYLE.PENDENTE;
@@ -799,12 +865,13 @@ function Historico({ cargas, cadastros, isAdmin, onDelete, onUpdate }) {
                   }}>
                     <td style={td}>{row.data ? row.data.split("-").reverse().join("/") : "—"}</td>
                     <td style={{ ...td, fontFamily: MONO, color: !calc.placaCadastrada ? C.red : C.text }}>{row.placa || "—"}</td>
-                    <td style={{ ...td, color: calc.motorista === "PLACA NÃO CADASTRADA" ? C.red : C.text }}>{calc.motorista || "—"}</td>
+                    <td style={td}>{row.motorista || "—"}</td>
+                    <td style={td}>{row.fornecedor || "—"}</td>
                     <td style={td}>{row.produto || "—"}</td>
                     <td style={{ ...td, fontFamily: MONO }}>{fmtL(num(row.ofertado))}</td>
                     <td style={{ ...td, fontFamily: MONO }}>{fmtL(calc.volumeLiquido)}</td>
                     <td style={{ ...td, fontFamily: MONO, color: calc.divergenciaAlta ? C.yellow : C.textDim }}>
-                      {calc.divergencia >= 0 ? "+" : ""}{calc.divergencia.toLocaleString("pt-BR", { maximumFractionDigits: 0 })} L
+                      {calc.divergencia >= 0 ? "+" : ""}{calc.divergencia.toLocaleString("pt-BR", { maximumFractionDigits: 0 })} {calc.unidadeDivergencia}
                     </td>
                     <td style={{ ...td, fontFamily: MONO }}>{fmtR(calc.valorTotal)}</td>
                     <td style={{ ...td, fontFamily: MONO }}>{fmtMins(calc.tempoMin)}</td>
@@ -837,13 +904,13 @@ const td = { padding: "9px 12px", whiteSpace: "nowrap" };
 /* ---------------------------------------------------------------------
    TAB: PAINEL RESUMO
 --------------------------------------------------------------------- */
-function PainelResumo({ cargas, cadastros }) {
+function PainelResumo({ cargas, cadastros, config }) {
   const byMonth = useMemo(() => {
     const map = {};
     cargas.forEach((row) => {
       const mk = monthKey(row.data);
       if (!map[mk]) map[mk] = { mes: mk, ofertado: 0, liquido: 0, divergencia: 0, custo: 0, n: 0, tempos: [] };
-      const calc = computeCarga(row, cadastros.veiculos);
+      const calc = computeCarga(row, cadastros.veiculos, config);
       map[mk].ofertado += num(row.ofertado);
       map[mk].liquido += calc.volumeLiquido;
       map[mk].divergencia += calc.divergencia;
@@ -852,7 +919,7 @@ function PainelResumo({ cargas, cadastros }) {
       if (calc.tempoMin !== null) map[mk].tempos.push(calc.tempoMin);
     });
     return Object.values(map).sort((a, b) => (a.mes > b.mes ? 1 : -1));
-  }, [cargas, cadastros.veiculos]);
+  }, [cargas, cadastros.veiculos, config]);
 
   const totals = byMonth.reduce((acc, m) => ({
     ofertado: acc.ofertado + m.ofertado, liquido: acc.liquido + m.liquido,
@@ -960,12 +1027,12 @@ function Stat({ label, value, accent }) {
 const REGISTRY_CONFIG = {
   fornecedores: { label: "Fornecedores", icon: Building2, fields: [{ k: "nome", label: "Fornecedor" }, { k: "cnpj", label: "CNPJ" }] },
   motoristas: { label: "Motoristas", icon: Users, fields: [{ k: "nome", label: "Motorista" }, { k: "telefone", label: "Telefone" }] },
-  veiculos: { label: "Veículos", icon: Truck, fields: [{ k: "placa", label: "Placa" }, { k: "motorista", label: "Motorista" }, { k: "fornecedor", label: "Fornecedor" }] },
+  veiculos: { label: "Veículos", icon: Truck, fields: [{ k: "placa", label: "Placa carreta" }, { k: "transportadora", label: "Transportadora" }, { k: "observacoes", label: "Observações" }] },
   produtos: { label: "Produtos", icon: Droplets, fields: [{ k: "nome", label: "Produto" }, { k: "unidade", label: "Unidade" }] },
   tanques: { label: "Tanques", icon: Gauge, fields: [{ k: "nome", label: "Tanque" }, { k: "capacidade", label: "Capacidade (L)" }, { k: "produto", label: "Produto" }] },
 };
 
-function Cadastros({ cadastros, cargas, isAdmin, onSave }) {
+function Cadastros({ cadastros, cargas, isAdmin, onSave, config }) {
   const [sub, setSub] = useState("veiculos");
   const cfg = REGISTRY_CONFIG[sub];
   const list = cadastros[sub];
@@ -974,11 +1041,11 @@ function Cadastros({ cadastros, cargas, isAdmin, onSave }) {
   const tankUsage = useMemo(() => {
     const map = {};
     cargas.filter((c) => monthKey(c.data) === currentMonth).forEach((c) => {
-      const calc = computeCarga(c, cadastros.veiculos);
+      const calc = computeCarga(c, cadastros.veiculos, config);
       map[c.tanque] = (map[c.tanque] || 0) + calc.volumeLiquido;
     });
     return map;
-  }, [cargas, cadastros.veiculos, currentMonth]);
+  }, [cargas, cadastros.veiculos, currentMonth, config]);
 
   const emptyRow = Object.fromEntries(cfg.fields.map((f) => [f.k, ""]));
   const [form, setForm] = useState(emptyRow);
@@ -1039,12 +1106,7 @@ function Cadastros({ cadastros, cargas, isAdmin, onSave }) {
         <div style={{ display: "grid", gridTemplateColumns: `repeat(${cfg.fields.length}, 1fr) auto`, gap: 12, alignItems: "end" }} className="scrc-form-row">
           {cfg.fields.map((f) => (
             <Field key={f.k} label={f.label}>
-              {sub === "veiculos" && f.k === "motorista" ? (
-                <Select value={form[f.k]} onChange={set(f.k)}>
-                  <option value="">Selecione…</option>
-                  {cadastros.motoristas.map((m) => <option key={m.id} value={m.nome}>{m.nome}</option>)}
-                </Select>
-              ) : sub === "veiculos" && f.k === "fornecedor" ? (
+              {sub === "veiculos" && f.k === "transportadora" ? (
                 <Select value={form[f.k]} onChange={set(f.k)}>
                   <option value="">Selecione…</option>
                   {cadastros.fornecedores.map((m) => <option key={m.id} value={m.nome}>{m.nome}</option>)}
@@ -1076,6 +1138,7 @@ function Cadastros({ cadastros, cargas, isAdmin, onSave }) {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
             <tr style={{ background: C.panelAlt }}>
+              <th style={{ textAlign: "left", padding: "9px 12px", fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: C.textDim, borderBottom: `1px solid ${C.border}` }}>Código</th>
               {cfg.fields.map((f) => (
                 <th key={f.k} style={{ textAlign: "left", padding: "9px 12px", fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: C.textDim, borderBottom: `1px solid ${C.border}` }}>{f.label}</th>
               ))}
@@ -1086,7 +1149,7 @@ function Cadastros({ cadastros, cargas, isAdmin, onSave }) {
           </thead>
           <tbody>
             {list.length === 0 && (
-              <tr><td colSpan={cfg.fields.length + 3} style={{ padding: 20, textAlign: "center", color: C.textDim }}>Nenhum item cadastrado.</td></tr>
+              <tr><td colSpan={cfg.fields.length + 4} style={{ padding: 20, textAlign: "center", color: C.textDim }}>Nenhum item cadastrado.</td></tr>
             )}
             {list.map((row) => {
               const usage = sub === "tanques" ? (tankUsage[row.nome] || 0) : null;
@@ -1094,6 +1157,7 @@ function Cadastros({ cadastros, cargas, isAdmin, onSave }) {
               const pct = cap > 0 ? (usage / cap) * 100 : 0;
               return (
                 <tr key={row.id} style={{ borderBottom: `1px solid ${C.border}`, opacity: row.status === "INATIVO" ? 0.5 : 1 }}>
+                  <td style={{ ...td, fontFamily: MONO, color: C.textFaint }}>{codigoCadastro(sub, list, row)}</td>
                   {cfg.fields.map((f) => (
                     <td key={f.k} style={{ ...td, fontFamily: f.k === "placa" ? MONO : "inherit" }}>{row[f.k] || "—"}</td>
                   ))}
@@ -1130,6 +1194,74 @@ function Cadastros({ cadastros, cargas, isAdmin, onSave }) {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------
+   TAB: CONFIGURAÇÕES
+--------------------------------------------------------------------- */
+function Configuracoes({ config, cadastros, onSave }) {
+  const [form, setForm] = useState(config);
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const setBool = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value === "SIM" }));
+
+  const dirty = JSON.stringify(form) !== JSON.stringify(config);
+  const produtosAtivos = cadastros.produtos.filter((p) => p.status === "ATIVO");
+
+  return (
+    <div>
+      <SectionTitle eyebrow="Padrões do sistema" title="Configurações" />
+      <Card style={{ maxWidth: 640 }}>
+        <div style={{ display: "grid", gap: 16 }}>
+          <Field label="Produto padrão" hint="Sugerido automaticamente ao abrir Lançar Carga">
+            <Select value={form.produtoPadrao} onChange={set("produtoPadrao")}>
+              {produtosAtivos.map((p) => <option key={p.id} value={p.nome}>{p.nome}</option>)}
+            </Select>
+          </Field>
+          <Field label="Aplicar produto padrão automaticamente?">
+            <Select value={form.aplicarProdutoPadrao ? "SIM" : "NÃO"} onChange={setBool("aplicarProdutoPadrao")}>
+              <option value="SIM">Sim</option>
+              <option value="NÃO">Não — deixar em branco para escolha manual</option>
+            </Select>
+          </Field>
+          <Field label="Status padrão" hint="Sugerido ao iniciar uma carga">
+            <Select value={form.statusPadrao} onChange={set("statusPadrao")}>
+              {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+            </Select>
+          </Field>
+          <div style={{ height: 1, background: C.border }} />
+          <Field label="Unidade da divergência" hint="Em qual unidade a divergência é calculada e comparada ao limite">
+            <Select value={form.unidadeDivergencia} onChange={set("unidadeDivergencia")}>
+              <option value="L">Litros (L)</option>
+              <option value="KG">Quilos (KG)</option>
+            </Select>
+          </Field>
+          <Field label={`Limite de divergência (${form.unidadeDivergencia})`} hint="Acima desse valor a carga recebe alerta visual">
+            <Input type="number" value={form.limiteDivergencia} onChange={set("limiteDivergencia")} />
+          </Field>
+          <Field label="Destacar divergência acima do limite?">
+            <Select value={form.alertaDivergencia ? "SIM" : "NÃO"} onChange={setBool("alertaDivergencia")}>
+              <option value="SIM">Sim</option>
+              <option value="NÃO">Não — desligar o alerta visual</option>
+            </Select>
+          </Field>
+          <div style={{
+            background: C.panelAlt, border: `1px solid ${C.border}`, borderRadius: 4, padding: 12,
+            fontSize: 12.5, color: C.textDim, lineHeight: 1.5,
+          }}>
+            <strong style={{ color: C.text }}>Regra de custo:</strong> o campo Custo Unitário deve ser
+            preenchido com o valor final aplicável à carga — qualquer componente interno (como um fator
+            de ajuste) já deve estar incorporado ao valor digitado. O Valor Total é calculado como
+            Volume c/ BSW × (Custo Unitário + Frete).
+          </div>
+          <div>
+            <Btn onClick={() => onSave(form)} style={!dirty ? { opacity: 0.4, pointerEvents: "none" } : {}}>
+              <Save size={14} /> Salvar configurações
+            </Btn>
+          </div>
+        </div>
+      </Card>
     </div>
   );
 }

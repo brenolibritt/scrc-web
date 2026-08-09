@@ -324,7 +324,7 @@ export default function App() {
 
   const showToast = useCallback((msg, kind = "ok") => {
     setToast({ msg, kind });
-    setTimeout(() => setToast(null), 2600);
+    setTimeout(() => setToast(null), kind === "err" ? 8000 : 2600);
   }, []);
 
   useEffect(() => {
@@ -360,21 +360,21 @@ export default function App() {
     setCargas(next);
     try {
       await window.storage.set("scrc_cargas", JSON.stringify(next), true);
-    } catch (e) { showToast("Não consegui salvar. Verifique a conexão com o banco de dados.", "err"); }
+    } catch (e) { showToast("Não consegui salvar: " + (e?.message || "erro desconhecido") + (e?.hint ? " — " + e.hint : ""), "err"); console.error("Erro ao salvar:", e); }
   }, [showToast]);
 
   const persistCadastros = useCallback(async (next) => {
     setCadastros(next);
     try {
       await window.storage.set("scrc_cadastros", JSON.stringify(next), true);
-    } catch (e) { showToast("Não consegui salvar. Verifique a conexão com o banco de dados.", "err"); }
+    } catch (e) { showToast("Não consegui salvar: " + (e?.message || "erro desconhecido") + (e?.hint ? " — " + e.hint : ""), "err"); console.error("Erro ao salvar:", e); }
   }, [showToast]);
 
   const persistConfig = useCallback(async (next) => {
     setConfig(next);
     try {
       await window.storage.set("scrc_config", JSON.stringify(next), true);
-    } catch (e) { showToast("Não consegui salvar. Verifique a conexão com o banco de dados.", "err"); }
+    } catch (e) { showToast("Não consegui salvar: " + (e?.message || "erro desconhecido") + (e?.hint ? " — " + e.hint : ""), "err"); console.error("Erro ao salvar:", e); }
   }, [showToast]);
 
   const veiculosAtivos = useMemo(
@@ -533,13 +533,13 @@ export default function App() {
 
       {toast && (
         <div style={{
-          position: "fixed", bottom: 20, right: 20, background: toast.kind === "err" ? C.redBg : C.greenBg,
+          position: "fixed", bottom: 20, right: 20, maxWidth: 420, background: toast.kind === "err" ? C.redBg : C.greenBg,
           border: `1px solid ${toast.kind === "err" ? C.red : C.green}55`,
           color: toast.kind === "err" ? C.red : C.green,
           padding: "10px 16px", borderRadius: 6, fontSize: 13, fontWeight: 600,
-          display: "flex", alignItems: "center", gap: 8, boxShadow: "0 6px 20px rgba(0,0,0,.4)", zIndex: 50,
+          display: "flex", alignItems: "flex-start", gap: 8, boxShadow: "0 6px 20px rgba(0,0,0,.4)", zIndex: 50,
         }}>
-          <Check size={15} /> {toast.msg}
+          <Check size={15} style={{ flexShrink: 0, marginTop: 1 }} /> <span>{toast.msg}</span>
         </div>
       )}
     </div>

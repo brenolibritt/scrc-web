@@ -8,6 +8,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer
 } from "recharts";
+import { storageGet, storageSet } from "./lib/storage.js";
 
 /* ---------------------------------------------------------------------
    TOKENS
@@ -335,22 +336,22 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
-        const c = await window.storage.get("scrc_cargas", true);
+        const c = await storageGet("scrc_cargas");
         if (c && c.value) setCargas(JSON.parse(c.value));
       } catch (e) { /* no data yet */ }
       try {
-        const r = await window.storage.get("scrc_cadastros", true);
+        const r = await storageGet("scrc_cadastros");
         if (r && r.value) setCadastros(JSON.parse(r.value));
-        else await window.storage.set("scrc_cadastros", JSON.stringify(SEED_CADASTROS), true);
+        else await storageSet("scrc_cadastros", JSON.stringify(SEED_CADASTROS));
       } catch (e) {
-        try { await window.storage.set("scrc_cadastros", JSON.stringify(SEED_CADASTROS), true); } catch (_) {}
+        try { await storageSet("scrc_cadastros", JSON.stringify(SEED_CADASTROS)); } catch (_) {}
       }
       try {
-        const cfg = await window.storage.get("scrc_config", true);
+        const cfg = await storageGet("scrc_config");
         if (cfg && cfg.value) setConfig({ ...SEED_CONFIG, ...JSON.parse(cfg.value) });
-        else await window.storage.set("scrc_config", JSON.stringify(SEED_CONFIG), true);
+        else await storageSet("scrc_config", JSON.stringify(SEED_CONFIG));
       } catch (e) {
-        try { await window.storage.set("scrc_config", JSON.stringify(SEED_CONFIG), true); } catch (_) {}
+        try { await storageSet("scrc_config", JSON.stringify(SEED_CONFIG)); } catch (_) {}
       }
       setLoading(false);
     })();
@@ -359,21 +360,21 @@ export default function App() {
   const persistCargas = useCallback(async (next) => {
     setCargas(next);
     try {
-      await window.storage.set("scrc_cargas", JSON.stringify(next), true);
+      await storageSet("scrc_cargas", JSON.stringify(next));
     } catch (e) { showToast("Não consegui salvar: " + (e?.message || "erro desconhecido") + (e?.hint ? " — " + e.hint : ""), "err"); console.error("Erro ao salvar:", e); }
   }, [showToast]);
 
   const persistCadastros = useCallback(async (next) => {
     setCadastros(next);
     try {
-      await window.storage.set("scrc_cadastros", JSON.stringify(next), true);
+      await storageSet("scrc_cadastros", JSON.stringify(next));
     } catch (e) { showToast("Não consegui salvar: " + (e?.message || "erro desconhecido") + (e?.hint ? " — " + e.hint : ""), "err"); console.error("Erro ao salvar:", e); }
   }, [showToast]);
 
   const persistConfig = useCallback(async (next) => {
     setConfig(next);
     try {
-      await window.storage.set("scrc_config", JSON.stringify(next), true);
+      await storageSet("scrc_config", JSON.stringify(next));
     } catch (e) { showToast("Não consegui salvar: " + (e?.message || "erro desconhecido") + (e?.hint ? " — " + e.hint : ""), "err"); console.error("Erro ao salvar:", e); }
   }, [showToast]);
 

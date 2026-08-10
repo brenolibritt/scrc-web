@@ -749,7 +749,8 @@ function LancarCarga({ cadastros, config, onSave }) {
       </Card>
 
       {/* LIVE PREVIEW */}
-      <Card style={{ alignSelf: "start", position: "sticky", top: 0 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 20, alignSelf: "start", position: "sticky", top: 0 }}>
+      <Card>
         <SectionTitle eyebrow="Cálculo automático" title="Prévia" />
         <div style={{ display: "grid", gap: 10, fontFamily: MONO }}>
           <PreviewRow label="Peso líquido" value={fmtKg(calc.pesoLiquido)} />
@@ -795,6 +796,43 @@ function LancarCarga({ cadastros, config, onSave }) {
           </div>
         )}
       </Card>
+
+      {/* VERIFICAÇÃO ESPECÍFICA — Peso Líquido ÷ Densidade = Volume c/ BSW */}
+      <Card style={{ alignSelf: "start" }}>
+        <SectionTitle eyebrow="Conferência específica" title="Verificação — Volume c/ BSW" />
+        <p style={{ fontSize: 12.5, color: C.textDim, marginTop: -8, marginBottom: 16, lineHeight: 1.5 }}>
+          Confere isoladamente a conta de Peso Líquido pela Densidade 20º informada — a mesma densidade
+          usada no cálculo geral acima, só que destacada aqui sozinha para dupla checagem.
+        </p>
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 14,
+          flexWrap: "wrap", fontFamily: MONO, padding: "8px 0",
+        }}>
+          <EquationBlock label="Peso líquido" value={fmtKg(calc.pesoLiquido)} />
+          <span style={{ fontSize: 22, color: C.textFaint }}>÷</span>
+          <EquationBlock label="Densidade 20º" value={num(form.densidade).toLocaleString("pt-BR", { maximumFractionDigits: 4 })} />
+          <span style={{ fontSize: 22, color: C.textFaint }}>=</span>
+          <EquationBlock label="Volume c/ BSW" value={fmtL(calc.volumeComBSW)} accent big />
+        </div>
+      </Card>
+      </div>
+    </div>
+  );
+}
+
+function EquationBlock({ label, value, accent, big }) {
+  return (
+    <div style={{
+      display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+      background: C.panelAlt, border: `1px solid ${accent ? C.accent + "55" : C.border}`,
+      borderRadius: 6, padding: "10px 16px", minWidth: 120,
+    }}>
+      <span style={{ fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase", color: C.textDim, fontFamily: "'Inter',system-ui,sans-serif" }}>
+        {label}
+      </span>
+      <span style={{ fontSize: big ? 18 : 15, fontWeight: 700, color: accent ? C.accent : C.text }}>
+        {value}
+      </span>
     </div>
   );
 }

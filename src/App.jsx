@@ -97,10 +97,10 @@ function computeCarga(row, veiculos, config) {
   const valorFrete = volumeComBSW * frete;
   const custoMercadoria = valorProduto + valorFrete;
 
-  // Tributos: cada um é uma alíquota em %, aplicada sobre o valor da mercadoria + frete.
-  const icms = custoMercadoria * (num(row.icms) / 100);
-  const pis = custoMercadoria * (num(row.pis) / 100);
-  const cofins = custoMercadoria * (num(row.cofins) / 100);
+  // Tributos: cada um é uma alíquota em %, aplicada sobre o Volume Líquido (L).
+  const icms = volumeLiquido * (num(row.icms) / 100);
+  const pis = volumeLiquido * (num(row.pis) / 100);
+  const cofins = volumeLiquido * (num(row.cofins) / 100);
   const totalTributos = icms + pis + cofins;
 
   const valorTotal = custoMercadoria + totalTributos;
@@ -708,7 +708,7 @@ function LancarCarga({ cadastros, config, onSave }) {
           </div>
 
           <div style={{ fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: C.textDim, fontWeight: 600, marginTop: 4 }}>
-            Tributos (%, aplicados sobre Custo mercadoria + frete)
+            Tributos (%, aplicados sobre o Volume Líquido)
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
             <Field label="ICMS (%)" hint="ex: 18 para 18%"><Input type="number" step="0.01" value={form.icms} onChange={set("icms")} /></Field>

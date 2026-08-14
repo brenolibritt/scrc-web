@@ -52,8 +52,8 @@ const monthLabel = (isoDate) => {
 };
 const monthKey = (isoDate) => (isoDate ? isoDate.slice(0, 7) : "—");
 
-const fmtL = (v) => `${v.toLocaleString("pt-BR", { maximumFractionDigits: 0 })} L`;
-const fmtKg = (v) => `${v.toLocaleString("pt-BR", { maximumFractionDigits: 0 })} kg`;
+const fmtL = (v) => `${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L`;
+const fmtKg = (v) => `${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`;
 const fmtR = (v) =>
   `R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -93,14 +93,15 @@ function computeCarga(row, veiculos, config) {
 
   const custoUnit = num(row.custoUnit); // já inclui qualquer componente interno (ex: FI)
   const frete = num(row.frete);
-  const custoMercadoria = volumeComBSW * (custoUnit + frete);
+  const valorProduto = volumeComBSW * custoUnit;
+  const valorFrete = volumeComBSW * frete;
+  const custoMercadoria = valorProduto + valorFrete;
 
-  // Tributos: cada um é uma taxa em R$/L, multiplicada pelo Volume Líquido.
-  const icms = volumeLiquido * num(row.icms);
-  const pis = volumeLiquido * num(row.pis);
-  const cofins = volumeLiquido * num(row.cofins);
-  const cide = volumeLiquido * num(row.cide);
-  const totalTributos = icms + pis + cofins + cide;
+  // Tributos: cada um é uma alíquota em %, aplicada sobre o valor da mercadoria + frete.
+  const icms = custoMercadoria * (num(row.icms) / 100);
+  const pis = custoMercadoria * (num(row.pis) / 100);
+  const cofins = custoMercadoria * (num(row.cofins) / 100);
+  const totalTributos = icms + pis + cofins;
 
   const valorTotal = custoMercadoria + totalTributos;
   const tp = tempoPatio(row.chegada, row.saida);
@@ -113,7 +114,7 @@ function computeCarga(row, veiculos, config) {
 
   return {
     pesoLiquido, volumeComBSW, bswL, volumeLiquido, divergencia, divergenciaAlta,
-    custoMercadoria, icms, pis, cofins, cide, totalTributos,
+    valorProduto, valorFrete, custoMercadoria, icms, pis, cofins, totalTributos,
     valorTotal, tempoMin: tp, transportadora, placaCadastrada, unidadeDivergencia: unidade,
   };
 }
@@ -136,7 +137,7 @@ const STATUS_STYLE = {
 const emptyForm = {
   data: "", chegada: "", saida: "", placa: "", motorista: "", notaFiscal: "", fornecedor: "", produto: "",
   api: "", ofertado: "", pesoBruto: "", drenagem: "0", tara: "", densidade: "",
-  bsw: "", tanque: "", custoUnit: "", frete: "", icms: "0", pis: "0", cofins: "0", cide: "0", status: "PENDENTE",
+  bsw: "", tanque: "", custoUnit: "", frete: "", icms: "0", pis: "0", cofins: "0", status: "PENDENTE",
   observacoes: "", lote: "",
 };
 
@@ -707,13 +708,12 @@ function LancarCarga({ cadastros, config, onSave }) {
           </div>
 
           <div style={{ fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: C.textDim, fontWeight: 600, marginTop: 4 }}>
-            Tributos (R$/L, multiplicados pelo Volume Líquido)
+            Tributos (%, aplicados sobre Custo mercadoria + frete)
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
-            <Field label="ICMS (R$/L)"><Input type="number" step="0.01" value={form.icms} onChange={set("icms")} /></Field>
-            <Field label="PIS (R$/L)"><Input type="number" step="0.01" value={form.pis} onChange={set("pis")} /></Field>
-            <Field label="COFINS (R$/L)"><Input type="number" step="0.01" value={form.cofins} onChange={set("cofins")} /></Field>
-            <Field label="CIDE (R$/L)"><Input type="number" step="0.01" value={form.cide} onChange={set("cide")} /></Field>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+            <Field label="ICMS (%)" hint="ex: 18 para 18%"><Input type="number" step="0.01" value={form.icms} onChange={set("icms")} /></Field>
+            <Field label="PIS (%)" hint="ex: 1,65 para 1,65%"><Input type="number" step="0.01" value={form.pis} onChange={set("pis")} /></Field>
+            <Field label="COFINS (%)" hint="ex: 7,6 para 7,6%"><Input type="number" step="0.01" value={form.cofins} onChange={set("cofins")} /></Field>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
@@ -759,16 +759,17 @@ function LancarCarga({ cadastros, config, onSave }) {
           <PreviewRow label="Volume líquido" value={fmtL(calc.volumeLiquido)} accent />
           <PreviewRow
             label={`Divergência (${calc.unidadeDivergencia})`}
-            value={`${calc.divergencia >= 0 ? "+" : ""}${calc.divergencia.toLocaleString("pt-BR", { maximumFractionDigits: 0 })} ${calc.unidadeDivergencia}`}
+            value={`${calc.divergencia >= 0 ? "+" : ""}${calc.divergencia.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${calc.unidadeDivergencia}`}
             warn={calc.divergenciaAlta}
           />
           <PreviewRow label="Tempo no pátio" value={fmtMins(calc.tempoMin)} />
           <div style={{ height: 1, background: C.border, margin: "6px 0" }} />
+          <PreviewRow label="Valor do produto" value={fmtR(calc.valorProduto)} />
+          <PreviewRow label="Valor do frete" value={fmtR(calc.valorFrete)} />
           <PreviewRow label="Custo mercadoria + frete" value={fmtR(calc.custoMercadoria)} />
           <PreviewRow label="ICMS" value={fmtR(calc.icms)} />
           <PreviewRow label="PIS" value={fmtR(calc.pis)} />
           <PreviewRow label="COFINS" value={fmtR(calc.cofins)} />
-          <PreviewRow label="CIDE" value={fmtR(calc.cide)} />
           <PreviewRow label="Total de tributos" value={fmtR(calc.totalTributos)} />
           <div style={{ height: 1, background: C.border, margin: "6px 0" }} />
           <PreviewRow label="Valor total" value={fmtR(calc.valorTotal)} big />
@@ -858,6 +859,7 @@ function PreviewRow({ label, value, accent, warn, big }) {
 function Historico({ cargas, cadastros, config, isAdmin, onDelete, onUpdate }) {
   const [monthFilter, setMonthFilter] = useState("todos");
   const [query, setQuery] = useState("");
+  const [editingRow, setEditingRow] = useState(null);
 
   const months = useMemo(() => {
     const s = new Set(cargas.map((c) => monthKey(c.data)));
@@ -910,7 +912,12 @@ function Historico({ cargas, cadastros, config, isAdmin, onDelete, onUpdate }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 1000 }}>
             <thead>
               <tr style={{ background: C.panelAlt }}>
-                {["Data","Placa","Motorista","Fornecedor","Produto","Ofertado","Líquido","Divergência","Tributos","Valor Total","Pátio","Status","NF", isAdmin ? "" : null].filter((h) => h !== null).map((h) => (
+                {[
+                  "Data","Placa","Motorista","Fornecedor","Produto","API","Ofertado",
+                  "Peso Bruto (KG)","Drenagem Água (L)","Tara (KG)","Densidade 20º","BS&W (%)",
+                  "Líquido","Divergência","Custo Unit. (R$/L)","Frete (R$/L)","Valor Frete (R$)","Tributos","Valor Total",
+                  "Pátio","Status","NF", isAdmin ? "" : null,
+                ].filter((h) => h !== null).map((h) => (
                   <th key={h} style={{
                     textAlign: "left", padding: "9px 12px", fontSize: 10.5, letterSpacing: "0.06em",
                     textTransform: "uppercase", color: C.textDim, borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap",
@@ -934,11 +941,20 @@ function Historico({ cargas, cadastros, config, isAdmin, onDelete, onUpdate }) {
                     <td style={td}>{row.motorista || "—"}</td>
                     <td style={td}>{row.fornecedor || "—"}</td>
                     <td style={td}>{row.produto || "—"}</td>
+                    <td style={{ ...td, fontFamily: MONO }}>{row.api || "—"}</td>
                     <td style={{ ...td, fontFamily: MONO }}>{fmtL(num(row.ofertado))}</td>
+                    <td style={{ ...td, fontFamily: MONO }}>{row.pesoBruto ? fmtKg(num(row.pesoBruto)) : "—"}</td>
+                    <td style={{ ...td, fontFamily: MONO }}>{row.drenagem ? fmtL(num(row.drenagem)) : "—"}</td>
+                    <td style={{ ...td, fontFamily: MONO }}>{row.tara ? fmtKg(num(row.tara)) : "—"}</td>
+                    <td style={{ ...td, fontFamily: MONO }}>{row.densidade || "—"}</td>
+                    <td style={{ ...td, fontFamily: MONO }}>{row.bsw || "0"}%</td>
                     <td style={{ ...td, fontFamily: MONO }}>{fmtL(calc.volumeLiquido)}</td>
                     <td style={{ ...td, fontFamily: MONO, color: calc.divergenciaAlta ? C.yellow : C.textDim }}>
-                      {calc.divergencia >= 0 ? "+" : ""}{calc.divergencia.toLocaleString("pt-BR", { maximumFractionDigits: 0 })} {calc.unidadeDivergencia}
+                      {calc.divergencia >= 0 ? "+" : ""}{calc.divergencia.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {calc.unidadeDivergencia}
                     </td>
+                    <td style={{ ...td, fontFamily: MONO }}>{row.custoUnit ? fmtR(num(row.custoUnit)) : "—"}</td>
+                    <td style={{ ...td, fontFamily: MONO }}>{row.frete ? fmtR(num(row.frete)) : "—"}</td>
+                    <td style={{ ...td, fontFamily: MONO, color: C.accent }}>{fmtR(calc.valorFrete)}</td>
                     <td style={{ ...td, fontFamily: MONO }}>{fmtR(calc.totalTributos)}</td>
                     <td style={{ ...td, fontFamily: MONO }}>{fmtR(calc.valorTotal)}</td>
                     <td style={{ ...td, fontFamily: MONO }}>{fmtMins(calc.tempoMin)}</td>
@@ -947,7 +963,13 @@ function Historico({ cargas, cadastros, config, isAdmin, onDelete, onUpdate }) {
                       {row.notaFiscal || "—"}{dup && " ⚠"}
                     </td>
                     {isAdmin && (
-                      <td style={td}>
+                      <td style={{ ...td, display: "flex", gap: 4 }}>
+                        <button onClick={() => setEditingRow(row)} title="Editar"
+                          style={{ background: "none", border: "none", cursor: "pointer", color: C.textFaint, padding: 4 }}
+                          onMouseEnter={(e) => (e.currentTarget.style.color = C.accent)}
+                          onMouseLeave={(e) => (e.currentTarget.style.color = C.textFaint)}>
+                          <Pencil size={14} />
+                        </button>
                         <button onClick={() => onDelete(row.id)} title="Excluir"
                           style={{ background: "none", border: "none", cursor: "pointer", color: C.textFaint, padding: 4 }}
                           onMouseEnter={(e) => (e.currentTarget.style.color = C.red)}
@@ -963,10 +985,157 @@ function Historico({ cargas, cadastros, config, isAdmin, onDelete, onUpdate }) {
           </table>
         </div>
       )}
+
+      {editingRow && (
+        <EditCargaModal
+          row={editingRow}
+          cadastros={cadastros}
+          config={config}
+          onClose={() => setEditingRow(null)}
+          onSave={(updated) => { onUpdate(updated); setEditingRow(null); }}
+        />
+      )}
     </div>
   );
 }
 const td = { padding: "9px 12px", whiteSpace: "nowrap" };
+
+/* ---------------------------------------------------------------------
+   MODAL: EDITAR CARGA
+--------------------------------------------------------------------- */
+function EditCargaModal({ row, cadastros, config, onClose, onSave }) {
+  const [form, setForm] = useState(row);
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const calc = useMemo(() => computeCarga(form, cadastros.veiculos, config), [form, cadastros.veiculos, config]);
+
+  const produtosAtivos = cadastros.produtos.filter((p) => p.status === "ATIVO");
+  const tanquesAtivos = cadastros.tanques.filter((t) => t.status === "ATIVO");
+  const motoristasAtivos = cadastros.motoristas.filter((m) => m.status === "ATIVO");
+  const fornecedoresAtivos = cadastros.fornecedores.filter((f) => f.status === "ATIVO");
+
+  const requiredOk = form.data && form.placa && form.produto && form.tanque &&
+    form.ofertado && form.pesoBruto && form.tara && form.densidade;
+
+  return (
+    <div onClick={onClose} style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,.65)", zIndex: 100,
+      display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "24px 16px", overflowY: "auto",
+    }}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8,
+        padding: 24, width: 720, maxWidth: "100%",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+          <SectionTitle eyebrow="Corrigir lançamento" title="Editar Carga" />
+          <button onClick={onClose} style={{ background: "none", border: "none", color: C.textDim, cursor: "pointer" }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div style={{ display: "grid", gap: 14, maxHeight: "65vh", overflowY: "auto", paddingRight: 4 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+            <Field label="Data" required><Input type="date" value={form.data} onChange={set("data")} /></Field>
+            <Field label="Chegada"><Input type="time" value={form.chegada} onChange={set("chegada")} /></Field>
+            <Field label="Saída"><Input type="time" value={form.saida} onChange={set("saida")} /></Field>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
+            <Field label="Placa carreta" required>
+              <Select value={form.placa} onChange={set("placa")}>
+                <option value="">Selecione…</option>
+                {cadastros.veiculos.map((v) => <option key={v.id} value={v.placa}>{v.placa}</option>)}
+              </Select>
+            </Field>
+            <Field label="Nota fiscal"><Input value={form.notaFiscal} onChange={set("notaFiscal")} /></Field>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
+            <Field label="Motorista">
+              <Select value={form.motorista} onChange={set("motorista")}>
+                <option value="">Selecione…</option>
+                {motoristasAtivos.map((m) => <option key={m.id} value={m.nome}>{m.nome}</option>)}
+              </Select>
+            </Field>
+            <Field label="Fornecedor">
+              <Select value={form.fornecedor} onChange={set("fornecedor")}>
+                <option value="">Selecione…</option>
+                {fornecedoresAtivos.map((f) => <option key={f.id} value={f.nome}>{f.nome}</option>)}
+              </Select>
+            </Field>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+            <Field label="Produto" required>
+              <Select value={form.produto} onChange={set("produto")}>
+                <option value="">Selecione…</option>
+                {produtosAtivos.map((p) => <option key={p.id} value={p.nome}>{p.nome}</option>)}
+              </Select>
+            </Field>
+            <Field label="API"><Input type="number" value={form.api} onChange={set("api")} /></Field>
+            <Field label="Ofertado NF (L)" required><Input type="number" value={form.ofertado} onChange={set("ofertado")} /></Field>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+            <Field label="Peso bruto (kg)" required><Input type="number" value={form.pesoBruto} onChange={set("pesoBruto")} /></Field>
+            <Field label="Drenagem água (L)"><Input type="number" value={form.drenagem} onChange={set("drenagem")} /></Field>
+            <Field label="Tara (kg)" required><Input type="number" value={form.tara} onChange={set("tara")} /></Field>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
+            <Field label="Densidade 20º" required><Input type="number" step="0.001" value={form.densidade} onChange={set("densidade")} /></Field>
+            <Field label="BS&W (%)"><Input type="number" step="0.01" value={form.bsw} onChange={set("bsw")} /></Field>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
+            <Field label="Custo unitário (R$/L)"><Input type="number" step="0.01" value={form.custoUnit} onChange={set("custoUnit")} /></Field>
+            <Field label="Frete (R$/L)"><Input type="number" step="0.01" value={form.frete} onChange={set("frete")} /></Field>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+            <Field label="ICMS (%)"><Input type="number" step="0.01" value={form.icms} onChange={set("icms")} /></Field>
+            <Field label="PIS (%)"><Input type="number" step="0.01" value={form.pis} onChange={set("pis")} /></Field>
+            <Field label="COFINS (%)"><Input type="number" step="0.01" value={form.cofins} onChange={set("cofins")} /></Field>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
+            <Field label="Tanque destino" required>
+              <Select value={form.tanque} onChange={set("tanque")}>
+                <option value="">Selecione…</option>
+                {tanquesAtivos.map((t) => <option key={t.id} value={t.nome}>{t.nome}</option>)}
+              </Select>
+            </Field>
+            <Field label="Status">
+              <Select value={form.status} onChange={set("status")}>
+                {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+              </Select>
+            </Field>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
+            <Field label="Lote"><Input value={form.lote} onChange={set("lote")} /></Field>
+            <Field label="Observações"><Input value={form.observacoes} onChange={set("observacoes")} /></Field>
+          </div>
+        </div>
+
+        <div style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          marginTop: 16, paddingTop: 16, borderTop: `1px solid ${C.border}`,
+        }}>
+          <span style={{ fontFamily: MONO, fontSize: 13, color: C.textDim }}>
+            Valor total: <strong style={{ color: C.accent }}>{fmtR(calc.valorTotal)}</strong>
+          </span>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+            <Btn onClick={() => requiredOk && onSave(form)} style={!requiredOk ? { opacity: 0.4, pointerEvents: "none" } : {}}>
+              <Check size={14} /> Salvar alterações
+            </Btn>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /* ---------------------------------------------------------------------
    TAB: PAINEL RESUMO
@@ -1019,7 +1188,7 @@ function PainelResumo({ cargas, cadastros, config }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 14, marginBottom: 20 }} className="scrc-stats">
         <Stat label="Ofertado (L)" value={fmtL(totals.ofertado)} />
         <Stat label="Volume líquido (L)" value={fmtL(totals.liquido)} accent />
-        <Stat label="Divergência (L)" value={`${totals.divergencia >= 0 ? "+" : ""}${totals.divergencia.toLocaleString("pt-BR", { maximumFractionDigits: 0 })}`} />
+        <Stat label="Divergência (L)" value={`${totals.divergencia >= 0 ? "+" : ""}${totals.divergencia.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />
         <Stat label="Tributos" value={fmtR(totals.tributos)} />
         <Stat label="Valor total" value={fmtR(totals.custo)} />
       </div>
@@ -1058,7 +1227,7 @@ function PainelResumo({ cargas, cadastros, config }) {
                 <td style={td}>{monthLabel(m.mes + "-01")}</td>
                 <td style={{ ...td, fontFamily: MONO }}>{fmtL(m.ofertado)}</td>
                 <td style={{ ...td, fontFamily: MONO }}>{fmtL(m.liquido)}</td>
-                <td style={{ ...td, fontFamily: MONO }}>{m.divergencia >= 0 ? "+" : ""}{m.divergencia.toLocaleString("pt-BR", { maximumFractionDigits: 0 })}</td>
+                <td style={{ ...td, fontFamily: MONO }}>{m.divergencia >= 0 ? "+" : ""}{m.divergencia.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                 <td style={{ ...td, fontFamily: MONO }}>{fmtR(m.tributos)}</td>
                 <td style={{ ...td, fontFamily: MONO }}>{fmtR(m.custo)}</td>
                 <td style={{ ...td, fontFamily: MONO }}>{m.n}</td>
@@ -1071,7 +1240,7 @@ function PainelResumo({ cargas, cadastros, config }) {
               <td style={td}>Total geral</td>
               <td style={{ ...td, fontFamily: MONO }}>{fmtL(totals.ofertado)}</td>
               <td style={{ ...td, fontFamily: MONO }}>{fmtL(totals.liquido)}</td>
-              <td style={{ ...td, fontFamily: MONO }}>{totals.divergencia >= 0 ? "+" : ""}{totals.divergencia.toLocaleString("pt-BR", { maximumFractionDigits: 0 })}</td>
+              <td style={{ ...td, fontFamily: MONO }}>{totals.divergencia >= 0 ? "+" : ""}{totals.divergencia.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
               <td style={{ ...td, fontFamily: MONO }}>{fmtR(totals.tributos)}</td>
               <td style={{ ...td, fontFamily: MONO }}>{fmtR(totals.custo)}</td>
               <td style={{ ...td, fontFamily: MONO }}>{totals.n}</td>

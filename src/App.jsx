@@ -816,6 +816,18 @@ function LancarCarga({ cadastros, config, onSave }) {
           <span style={{ fontSize: 22, color: C.textFaint }}>=</span>
           <EquationBlock label="Volume c/ BSW" value={fmtL(calc.volumeComBSW)} accent big />
         </div>
+
+        <div style={{ height: 1, background: C.border, margin: "16px 0" }} />
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 14,
+          flexWrap: "wrap", fontFamily: MONO, padding: "8px 0",
+        }}>
+          <EquationBlock label="Volume c/ BSW" value={fmtL(calc.volumeComBSW)} />
+          <span style={{ fontSize: 22, color: C.textFaint }}>×</span>
+          <EquationBlock label="BS&W (%)" value={`${num(form.bsw).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%`} />
+          <span style={{ fontSize: 22, color: C.textFaint }}>=</span>
+          <EquationBlock label="BS&W (L)" value={fmtL(calc.bswL)} accent big />
+        </div>
       </Card>
       </div>
     </div>

@@ -760,7 +760,7 @@ function LancarCarga({ cadastros, config, onSave }) {
           <PreviewRow label="Volume líquido" value={fmtL(calc.volumeLiquido)} accent />
           <PreviewRow
             label={`Divergência (${calc.unidadeDivergencia})`}
-            value={`${calc.divergencia >= 0 ? "+" : ""}${calc.divergencia.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${calc.unidadeDivergencia}`}
+            value={`${calc.divergencia.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${calc.unidadeDivergencia}`}
             warn={calc.divergenciaAlta}
           />
           <PreviewRow label="Tempo no pátio" value={fmtMins(calc.tempoMin)} />
@@ -962,7 +962,7 @@ function Historico({ cargas, cadastros, config, isAdmin, onDelete, onUpdate }) {
                     <td style={{ ...td, fontFamily: MONO }}>{row.bsw || "0"}%</td>
                     <td style={{ ...td, fontFamily: MONO }}>{fmtL(calc.volumeLiquido)}</td>
                     <td style={{ ...td, fontFamily: MONO, color: calc.divergenciaAlta ? C.yellow : C.textDim }}>
-                      {calc.divergencia >= 0 ? "+" : ""}{calc.divergencia.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {calc.unidadeDivergencia}
+                      {calc.divergencia.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {calc.unidadeDivergencia}
                     </td>
                     <td style={{ ...td, fontFamily: MONO }}>{row.custoUnit ? fmtR(num(row.custoUnit)) : "—"}</td>
                     <td style={{ ...td, fontFamily: MONO }}>{row.frete ? fmtR(num(row.frete)) : "—"}</td>
@@ -1204,7 +1204,7 @@ function PainelResumo({ cargas, cadastros, config }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 14, marginBottom: 20 }} className="scrc-stats">
         <Stat label="Ofertado (L)" value={fmtL(totals.ofertado)} />
         <Stat label="Volume líquido (L)" value={fmtL(totals.liquido)} accent />
-        <Stat label="Divergência (L)" value={`${totals.divergencia >= 0 ? "+" : ""}${totals.divergencia.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />
+        <Stat label="Divergência (L)" value={`${totals.divergencia.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />
         <Stat label="Tributos" value={fmtR(totals.tributos)} />
         <Stat label="Valor total" value={fmtR(totals.custo)} />
       </div>
@@ -1243,7 +1243,7 @@ function PainelResumo({ cargas, cadastros, config }) {
                 <td style={td}>{monthLabel(m.mes + "-01")}</td>
                 <td style={{ ...td, fontFamily: MONO }}>{fmtL(m.ofertado)}</td>
                 <td style={{ ...td, fontFamily: MONO }}>{fmtL(m.liquido)}</td>
-                <td style={{ ...td, fontFamily: MONO }}>{m.divergencia >= 0 ? "+" : ""}{m.divergencia.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                <td style={{ ...td, fontFamily: MONO }}>{m.divergencia.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                 <td style={{ ...td, fontFamily: MONO }}>{fmtR(m.tributos)}</td>
                 <td style={{ ...td, fontFamily: MONO }}>{fmtR(m.custo)}</td>
                 <td style={{ ...td, fontFamily: MONO }}>{m.n}</td>
@@ -1256,7 +1256,7 @@ function PainelResumo({ cargas, cadastros, config }) {
               <td style={td}>Total geral</td>
               <td style={{ ...td, fontFamily: MONO }}>{fmtL(totals.ofertado)}</td>
               <td style={{ ...td, fontFamily: MONO }}>{fmtL(totals.liquido)}</td>
-              <td style={{ ...td, fontFamily: MONO }}>{totals.divergencia >= 0 ? "+" : ""}{totals.divergencia.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+              <td style={{ ...td, fontFamily: MONO }}>{totals.divergencia.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
               <td style={{ ...td, fontFamily: MONO }}>{fmtR(totals.tributos)}</td>
               <td style={{ ...td, fontFamily: MONO }}>{fmtR(totals.custo)}</td>
               <td style={{ ...td, fontFamily: MONO }}>{totals.n}</td>

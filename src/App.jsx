@@ -635,7 +635,8 @@ function LancarCarga({ cadastros, config, onSave }) {
 
   const submit = () => {
     if (!requiredOk) return;
-    onSave(form);
+    const fornecedorSelecionado = cadastros.fornecedores.find((f) => f.nome === form.fornecedor);
+    onSave({ ...form, cnpj: fornecedorSelecionado?.cnpj || "" });
     setForm({
       ...emptyForm,
       produto: config.aplicarProdutoPadrao ? config.produtoPadrao : "",
@@ -880,7 +881,7 @@ function Historico({ cargas, cadastros, config, isAdmin, onDelete, onUpdate }) {
         const q = query.toLowerCase();
         const qDigits = query.replace(/\D/g, "");
         const fornecedor = cadastros.fornecedores.find((f) => f.nome === c.fornecedor);
-        const cnpj = fornecedor?.cnpj || "";
+        const cnpj = c.cnpj || fornecedor?.cnpj || "";
         const campos = [c.placa, c.notaFiscal, c.produto, c.tanque, c.motorista, c.fornecedor, cnpj]
           .join(" ")
           .toLowerCase();
@@ -921,7 +922,7 @@ function Historico({ cargas, cadastros, config, isAdmin, onDelete, onUpdate }) {
             <thead>
               <tr style={{ background: C.panelAlt }}>
                 {[
-                  "Data","Placa","Motorista","Fornecedor","Produto","API","Ofertado",
+                  "Data","Placa","Motorista","Fornecedor","CNPJ","Produto","API","Ofertado",
                   "Peso Bruto (KG)","Drenagem Água (L)","Tara (KG)","Densidade 20º","BS&W (%)",
                   "Líquido","Divergência","Custo Unit. (R$/L)","Frete (R$/L)","Valor Frete (R$)","Tributos","Valor Total",
                   "Pátio","Status","NF", isAdmin ? "" : null,
@@ -939,6 +940,8 @@ function Historico({ cargas, cadastros, config, isAdmin, onDelete, onUpdate }) {
                 const dup = row.notaFiscal && nfCounts[row.notaFiscal] > 1;
                 const missing = !row.tanque || !row.produto || !row.placa;
                 const st = STATUS_STYLE[row.status] || STATUS_STYLE.PENDENTE;
+                const fornecedorCadastro = cadastros.fornecedores.find((f) => f.nome === row.fornecedor);
+                const cnpjFornecedor = row.cnpj || fornecedorCadastro?.cnpj || "";
                 return (
                   <tr key={row.id} style={{
                     background: missing ? "#2A1F12" : "transparent",
@@ -948,6 +951,7 @@ function Historico({ cargas, cadastros, config, isAdmin, onDelete, onUpdate }) {
                     <td style={{ ...td, fontFamily: MONO, color: !calc.placaCadastrada ? C.red : C.text }}>{row.placa || "—"}</td>
                     <td style={td}>{row.motorista || "—"}</td>
                     <td style={td}>{row.fornecedor || "—"}</td>
+                    <td style={{ ...td, fontFamily: MONO }}>{cnpjFornecedor || "—"}</td>
                     <td style={td}>{row.produto || "—"}</td>
                     <td style={{ ...td, fontFamily: MONO }}>{row.api || "—"}</td>
                     <td style={{ ...td, fontFamily: MONO }}>{fmtL(num(row.ofertado))}</td>
@@ -1135,7 +1139,11 @@ function EditCargaModal({ row, cadastros, config, onClose, onSave }) {
           </span>
           <div style={{ display: "flex", gap: 8 }}>
             <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
-            <Btn onClick={() => requiredOk && onSave(form)} style={!requiredOk ? { opacity: 0.4, pointerEvents: "none" } : {}}>
+            <Btn onClick={() => {
+              if (!requiredOk) return;
+              const fornecedorSelecionado = cadastros.fornecedores.find((f) => f.nome === form.fornecedor);
+              onSave({ ...form, cnpj: fornecedorSelecionado?.cnpj || form.cnpj || "" });
+            }} style={!requiredOk ? { opacity: 0.4, pointerEvents: "none" } : {}}>
               <Check size={14} /> Salvar alterações
             </Btn>
           </div>

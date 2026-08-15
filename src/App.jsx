@@ -878,10 +878,18 @@ function Historico({ cargas, cadastros, config, isAdmin, onDelete, onUpdate }) {
       .filter((c) => {
         if (!query) return true;
         const q = query.toLowerCase();
-        return [c.placa, c.notaFiscal, c.produto, c.tanque, c.motorista, c.fornecedor].join(" ").toLowerCase().includes(q);
+        const qDigits = query.replace(/\D/g, "");
+        const fornecedor = cadastros.fornecedores.find((f) => f.nome === c.fornecedor);
+        const cnpj = fornecedor?.cnpj || "";
+        const campos = [c.placa, c.notaFiscal, c.produto, c.tanque, c.motorista, c.fornecedor, cnpj]
+          .join(" ")
+          .toLowerCase();
+        const cnpjDigits = cnpj.replace(/\D/g, "");
+
+        return campos.includes(q) || (qDigits.length > 0 && cnpjDigits.includes(qDigits));
       })
       .sort((a, b) => (a.data < b.data ? 1 : -1));
-  }, [cargas, monthFilter, query]);
+  }, [cargas, cadastros.fornecedores, monthFilter, query]);
 
   return (
     <div>
@@ -890,7 +898,7 @@ function Historico({ cargas, cadastros, config, isAdmin, onDelete, onUpdate }) {
       <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
         <div style={{ position: "relative", flex: "1 1 220px" }}>
           <Search size={14} color={C.textDim} style={{ position: "absolute", left: 10, top: 11 }} />
-          <Input placeholder="Buscar por placa, motorista, fornecedor, NF, produto…" value={query}
+          <Input placeholder="Buscar por placa, motorista, fornecedor, CNPJ, NF, produto…" value={query}
             onChange={(e) => setQuery(e.target.value)} style={{ paddingLeft: 30 }} />
         </div>
         <div style={{ width: 180 }}>

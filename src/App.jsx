@@ -565,7 +565,7 @@ export default function App() {
             onUpdateSaida={(row) => { persistCargasSaida(cargasSaida.map((c) => (c.id === row.id ? row : c))); showToast("Carga de saída atualizada."); }}
           />
         )}
-        {tab === "painel" && <PainelResumo cargas={cargas} cadastros={cadastros} config={config} />}
+        {tab === "painel" && <PainelResumo cargasEntrada={cargas} cargasSaida={cargasSaida} cadastros={cadastros} config={config} />}
         {tab === "cadastros" && (
           <Cadastros cadastros={cadastros} cargas={cargas} isAdmin={isAdmin} onSave={persistCadastros} config={config} />
         )}
@@ -1268,7 +1268,15 @@ function EditCargaModal({ row, cadastros, config, onClose, onSave }) {
 /* ---------------------------------------------------------------------
    TAB: PAINEL RESUMO
 --------------------------------------------------------------------- */
-function PainelResumo({ cargas, cadastros, config }) {
+function PainelResumo({ cargasEntrada, cargasSaida, cadastros, config }) {
+  const [tipoPainel, setTipoPainel] = useState("entrada");
+
+  const cargas = useMemo(() => {
+    if (tipoPainel === "saida") return cargasSaida;
+    if (tipoPainel === "consolidado") return [...cargasEntrada, ...cargasSaida];
+    return cargasEntrada;
+  }, [tipoPainel, cargasEntrada, cargasSaida]);
+
   const byMonth = useMemo(() => {
     const map = {};
     cargas.forEach((row) => {
@@ -1298,85 +1306,133 @@ function PainelResumo({ cargas, cadastros, config }) {
     "Líquido": Math.round(m.liquido),
   }));
 
-  if (cargas.length === 0) {
-    return (
-      <div>
-        <SectionTitle eyebrow="Comparativo mensal" title="Painel Resumo" />
-        <Card><div style={{ textAlign: "center", padding: "30px 0", color: C.textDim, fontSize: 13 }}>
-          Nenhum dado lançado ainda.
-        </div></Card>
-      </div>
-    );
-  }
+  const tituloTipo = tipoPainel === "entrada"
+    ? "Cargas de Entrada"
+    : tipoPainel === "saida"
+      ? "Cargas de Saída"
+      : "Consolidado — Entrada + Saída";
+
+  const botoes = [
+    { id: "entrada", label: `Entradas (${cargasEntrada.length})` },
+    { id: "saida", label: `Saídas (${cargasSaida.length})` },
+    { id: "consolidado", label: `Consolidado (${cargasEntrada.length + cargasSaida.length})` },
+  ];
 
   return (
     <div>
       <SectionTitle eyebrow="Comparativo mensal" title="Painel Resumo" />
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 14, marginBottom: 20 }} className="scrc-stats">
-        <Stat label="Ofertado (L)" value={fmtL(totals.ofertado)} />
-        <Stat label="Volume líquido (L)" value={fmtL(totals.liquido)} accent />
-        <Stat label="Divergência (L)" value={`${totals.divergencia.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />
-        <Stat label="Tributos" value={fmtR(totals.tributos)} />
-        <Stat label="Valor total" value={fmtR(totals.custo)} />
-      </div>
-
-      <Card style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 11, color: C.textDim, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 12 }}>
-          Ofertado vs. Volume Líquido por mês
-        </div>
-        <div style={{ width: "100%", height: 260 }}>
-          <ResponsiveContainer>
-            <BarChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-              <XAxis dataKey="mes" stroke={C.textDim} fontSize={12} />
-              <YAxis stroke={C.textDim} fontSize={12} />
-              <Tooltip contentStyle={{ background: C.panelAlt, border: `1px solid ${C.border}`, borderRadius: 4, fontSize: 12 }} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Bar dataKey="Ofertado" fill={C.steel} radius={[3, 3, 0, 0]} />
-              <Bar dataKey="Líquido" fill={C.accent} radius={[3, 3, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+      <Card style={{ marginBottom: 20, padding: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 10.5, color: C.textDim, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 3 }}>
+              Visualização do resumo
+            </div>
+            <div style={{ fontFamily: DISPLAY, fontSize: 16, fontWeight: 800, color: C.text }}>
+              {tituloTipo}
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {botoes.map((b) => {
+              const active = tipoPainel === b.id;
+              return (
+                <button
+                  key={b.id}
+                  onClick={() => setTipoPainel(b.id)}
+                  style={{
+                    background: active ? `${C.accentDim}44` : C.panelAlt,
+                    color: active ? C.accent : C.textDim,
+                    border: `1px solid ${active ? C.accentDim : C.border}`,
+                    borderBottom: active ? `2px solid ${C.accent}` : `2px solid ${C.border}`,
+                    borderRadius: 4,
+                    padding: "8px 13px",
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                    letterSpacing: "0.04em",
+                    textTransform: "uppercase",
+                    cursor: "pointer",
+                  }}
+                >
+                  {b.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </Card>
 
-      <div style={{ overflowX: "auto", border: `1px solid ${C.border}`, borderRadius: 6 }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 700 }}>
-          <thead>
-            <tr style={{ background: C.panelAlt }}>
-              {["Mês","Ofertado (L)","Líquido (L)","Divergência (L)","Tributos","Valor total","Cargas","Tempo médio pátio"].map((h) => (
-                <th key={h} style={{ textAlign: "left", padding: "9px 12px", fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: C.textDim, borderBottom: `1px solid ${C.border}` }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {byMonth.map((m) => (
-              <tr key={m.mes} style={{ borderBottom: `1px solid ${C.border}` }}>
-                <td style={td}>{monthLabel(m.mes + "-01")}</td>
-                <td style={{ ...td, fontFamily: MONO }}>{fmtL(m.ofertado)}</td>
-                <td style={{ ...td, fontFamily: MONO }}>{fmtL(m.liquido)}</td>
-                <td style={{ ...td, fontFamily: MONO }}>{m.divergencia.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                <td style={{ ...td, fontFamily: MONO }}>{fmtR(m.tributos)}</td>
-                <td style={{ ...td, fontFamily: MONO }}>{fmtR(m.custo)}</td>
-                <td style={{ ...td, fontFamily: MONO }}>{m.n}</td>
-                <td style={{ ...td, fontFamily: MONO }}>
-                  {m.tempos.length ? fmtMins(Math.round(m.tempos.reduce((a, b) => a + b, 0) / m.tempos.length)) : "—"}
-                </td>
-              </tr>
-            ))}
-            <tr style={{ background: C.panelAlt, fontWeight: 700 }}>
-              <td style={td}>Total geral</td>
-              <td style={{ ...td, fontFamily: MONO }}>{fmtL(totals.ofertado)}</td>
-              <td style={{ ...td, fontFamily: MONO }}>{fmtL(totals.liquido)}</td>
-              <td style={{ ...td, fontFamily: MONO }}>{totals.divergencia.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-              <td style={{ ...td, fontFamily: MONO }}>{fmtR(totals.tributos)}</td>
-              <td style={{ ...td, fontFamily: MONO }}>{fmtR(totals.custo)}</td>
-              <td style={{ ...td, fontFamily: MONO }}>{totals.n}</td>
-              <td style={td}>—</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      {cargas.length === 0 ? (
+        <Card><div style={{ textAlign: "center", padding: "30px 0", color: C.textDim, fontSize: 13 }}>
+          Nenhuma carga de {tipoPainel === "saida" ? "saída" : "entrada"} lançada ainda.
+        </div></Card>
+      ) : (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 14, marginBottom: 20 }} className="scrc-stats">
+            <Stat label="Ofertado (L)" value={fmtL(totals.ofertado)} />
+            <Stat label="Volume líquido (L)" value={fmtL(totals.liquido)} accent />
+            <Stat label="Divergência (L)" value={`${totals.divergencia.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />
+            <Stat label="Tributos" value={fmtR(totals.tributos)} />
+            <Stat label="Valor total" value={fmtR(totals.custo)} />
+          </div>
+
+          <Card style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 11, color: C.textDim, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 12 }}>
+              {tituloTipo} — Ofertado vs. Volume Líquido por mês
+            </div>
+            <div style={{ width: "100%", height: 260 }}>
+              <ResponsiveContainer>
+                <BarChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+                  <XAxis dataKey="mes" stroke={C.textDim} fontSize={12} />
+                  <YAxis stroke={C.textDim} fontSize={12} />
+                  <Tooltip contentStyle={{ background: C.panelAlt, border: `1px solid ${C.border}`, borderRadius: 4, fontSize: 12 }} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="Ofertado" fill={C.steel} radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="Líquido" fill={C.accent} radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+
+          <div style={{ overflowX: "auto", border: `1px solid ${C.border}`, borderRadius: 6 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 700 }}>
+              <thead>
+                <tr style={{ background: C.panelAlt }}>
+                  {["Mês","Ofertado (L)","Líquido (L)","Divergência (L)","Tributos","Valor total","Cargas","Tempo médio pátio"].map((h) => (
+                    <th key={h} style={{ textAlign: "left", padding: "9px 12px", fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: C.textDim, borderBottom: `1px solid ${C.border}` }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {byMonth.map((m) => (
+                  <tr key={m.mes} style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <td style={td}>{monthLabel(m.mes + "-01")}</td>
+                    <td style={{ ...td, fontFamily: MONO }}>{fmtL(m.ofertado)}</td>
+                    <td style={{ ...td, fontFamily: MONO }}>{fmtL(m.liquido)}</td>
+                    <td style={{ ...td, fontFamily: MONO }}>{m.divergencia.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td style={{ ...td, fontFamily: MONO }}>{fmtR(m.tributos)}</td>
+                    <td style={{ ...td, fontFamily: MONO }}>{fmtR(m.custo)}</td>
+                    <td style={{ ...td, fontFamily: MONO }}>{m.n}</td>
+                    <td style={{ ...td, fontFamily: MONO }}>
+                      {m.tempos.length ? fmtMins(Math.round(m.tempos.reduce((a, b) => a + b, 0) / m.tempos.length)) : "—"}
+                    </td>
+                  </tr>
+                ))}
+                <tr style={{ background: C.panelAlt, fontWeight: 700 }}>
+                  <td style={td}>Total geral</td>
+                  <td style={{ ...td, fontFamily: MONO }}>{fmtL(totals.ofertado)}</td>
+                  <td style={{ ...td, fontFamily: MONO }}>{fmtL(totals.liquido)}</td>
+                  <td style={{ ...td, fontFamily: MONO }}>{totals.divergencia.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td style={{ ...td, fontFamily: MONO }}>{fmtR(totals.tributos)}</td>
+                  <td style={{ ...td, fontFamily: MONO }}>{fmtR(totals.custo)}</td>
+                  <td style={{ ...td, fontFamily: MONO }}>{totals.n}</td>
+                  <td style={td}>—</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </div>
   );
 }

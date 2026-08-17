@@ -127,9 +127,11 @@ const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const ADMIN_PASSWORD = "admin123";
 
 const STATUS_OPTIONS = ["PENDENTE", "RECEBIDO", "EM ANÁLISE", "CANCELADO"];
+const STATUS_SAIDA = "ENVIADO";
 
 const STATUS_STYLE = {
   PENDENTE: { fg: C.yellow, bg: C.yellowBg },
+  ENVIADO: { fg: C.green, bg: C.greenBg },
   "RECEBIDO": { fg: C.green, bg: C.greenBg },
   CANCELADO: { fg: C.red, bg: C.redBg },
   "EM ANÁLISE": { fg: C.steel, bg: "#1B2530" },
@@ -650,7 +652,7 @@ function LancarCarga({ cadastros, config, onSave, tipo = "entrada" }) {
   const [form, setForm] = useState(() => ({
     ...emptyForm,
     produto: config.aplicarProdutoPadrao ? config.produtoPadrao : "",
-    status: config.statusPadrao || "PENDENTE",
+    status: tipo === "saida" ? STATUS_SAIDA : (config.statusPadrao || "PENDENTE"),
   }));
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -671,11 +673,11 @@ function LancarCarga({ cadastros, config, onSave, tipo = "entrada" }) {
   const submit = () => {
     if (!requiredOk) return;
     const fornecedorSelecionado = cadastros.fornecedores.find((f) => f.nome === form.fornecedor);
-    onSave({ ...form, cnpj: fornecedorSelecionado?.cnpj || "" });
+    onSave({ ...form, status: isSaida ? STATUS_SAIDA : form.status, cnpj: fornecedorSelecionado?.cnpj || "" });
     setForm({
       ...emptyForm,
       produto: config.aplicarProdutoPadrao ? config.produtoPadrao : "",
-      status: config.statusPadrao || "PENDENTE",
+      status: isSaida ? STATUS_SAIDA : (config.statusPadrao || "PENDENTE"),
     });
   };
 
@@ -763,9 +765,13 @@ function LancarCarga({ cadastros, config, onSave, tipo = "entrada" }) {
               </Select>
             </Field>
             <Field label="Status">
-              <Select value={form.status} onChange={set("status")}>
-                {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-              </Select>
+              {isSaida ? (
+                <Input value={STATUS_SAIDA} readOnly style={{ cursor: "not-allowed", opacity: 0.85 }} />
+              ) : (
+                <Select value={form.status} onChange={set("status")}>
+                  {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                </Select>
+              )}
             </Field>
           </div>
 

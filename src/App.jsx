@@ -5,7 +5,7 @@ import {
   ChevronDown, Search, Droplets, Warehouse, Lock, Unlock, Eye, Settings
 } from "lucide-react";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, LabelList,
   ResponsiveContainer
 } from "recharts";
 import { storageGet, storageSet } from "./lib/storage.js";
@@ -1308,8 +1308,10 @@ function PainelResumo({ cargasEntrada, cargasSaida, cadastros, config }) {
 
   const chartData = byMonth.map((m) => ({
     mes: monthLabel(m.mes + "-01"),
-    Ofertado: Math.round(m.ofertado),
-    "Líquido": Math.round(m.liquido),
+    ofertado: m.ofertado,
+    liquido: m.liquido,
+    divergencia: m.divergencia,
+    divergenciaPct: m.ofertado > 0 ? (m.divergencia / m.ofertado) * 100 : 0,
   }));
 
   const tituloTipo = tipoPainel === "entrada"
@@ -1382,19 +1384,78 @@ function PainelResumo({ cargasEntrada, cargasSaida, cadastros, config }) {
           </div>
 
           <Card style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: 11, color: C.textDim, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 12 }}>
-              {tituloTipo} — Ofertado vs. Volume Líquido por mês
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 11, color: C.textDim, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                {tituloTipo} — Comparativo Mensal — Volume Ofertado na NF × Volume Líquido Calculado
+              </div>
+              <div style={{ fontSize: 11.5, color: C.textFaint, marginTop: 5 }}>
+                A diferença entre os volumes representa a divergência apurada no período. Passe o mouse sobre as barras para ver os detalhes.
+              </div>
             </div>
-            <div style={{ width: "100%", height: 260 }}>
+            <div style={{ width: "100%", height: 300 }}>
               <ResponsiveContainer>
-                <BarChart data={chartData}>
+                <BarChart data={chartData} margin={{ top: 24, right: 12, left: 8, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
                   <XAxis dataKey="mes" stroke={C.textDim} fontSize={12} />
-                  <YAxis stroke={C.textDim} fontSize={12} />
-                  <Tooltip contentStyle={{ background: C.panelAlt, border: `1px solid ${C.border}`, borderRadius: 4, fontSize: 12 }} />
+                  <YAxis
+                    stroke={C.textDim}
+                    fontSize={12}
+                    tickFormatter={(v) => Number(v).toLocaleString("pt-BR", { maximumFractionDigits: 0 })}
+                  />
+                  <Tooltip
+                    cursor={{ fill: "rgba(255,255,255,0.025)" }}
+                    content={({ active, payload, label }) => {
+                      if (!active || !payload?.length) return null;
+                      const d = payload[0]?.payload;
+                      if (!d) return null;
+                      return (
+                        <div style={{
+                          background: C.panelAlt, border: `1px solid ${C.borderLight}`, borderRadius: 6,
+                          padding: "10px 12px", boxShadow: "0 8px 24px rgba(0,0,0,.35)", minWidth: 230,
+                        }}>
+                          <div style={{ fontWeight: 800, color: C.text, marginBottom: 8 }}>{label}</div>
+                          <div style={{ display: "grid", gap: 5, fontSize: 12 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: 14 }}>
+                              <span style={{ color: C.textDim }}>Ofertado na NF</span>
+                              <strong style={{ color: C.steel }}>{fmtL(d.ofertado)}</strong>
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: 14 }}>
+                              <span style={{ color: C.textDim }}>Volume líquido calculado</span>
+                              <strong style={{ color: C.accent }}>{fmtL(d.liquido)}</strong>
+                            </div>
+                            <div style={{ height: 1, background: C.border, margin: "3px 0" }} />
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: 14 }}>
+                              <span style={{ color: C.textDim }}>Divergência</span>
+                              <strong style={{ color: C.text }}>{fmtL(d.divergencia)}</strong>
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: 14 }}>
+                              <span style={{ color: C.textDim }}>Divergência percentual</span>
+                              <strong style={{ color: C.text }}>{d.divergenciaPct.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%</strong>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }}
+                  />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="Ofertado" fill={C.steel} radius={[3, 3, 0, 0]} />
-                  <Bar dataKey="Líquido" fill={C.accent} radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="ofertado" name="Ofertado na NF (L)" fill={C.steel} radius={[3, 3, 0, 0]}>
+                    <LabelList
+                      dataKey="ofertado"
+                      position="top"
+                      fill={C.textDim}
+                      fontSize={10}
+                      formatter={(v) => `${Number(v).toLocaleString("pt-BR", { maximumFractionDigits: 2 })} L`}
+                    />
+                  </Bar>
+                  <Bar dataKey="liquido" name="Volume Líquido Calculado (L)" fill={C.accent} radius={[3, 3, 0, 0]}>
+                    <LabelList
+                      dataKey="liquido"
+                      position="top"
+                      fill={C.textDim}
+                      fontSize={10}
+                      formatter={(v) => `${Number(v).toLocaleString("pt-BR", { maximumFractionDigits: 2 })} L`}
+                    />
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>

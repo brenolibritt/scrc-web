@@ -94,7 +94,7 @@ function computeCarga(row, veiculos, config) {
   const custoUnit = num(row.custoUnit); // já inclui qualquer componente interno (ex: FI)
   const frete = num(row.frete);
   const valorProduto = volumeLiquido * custoUnit;
-  const valorFrete = volumeComBSW * frete;
+  const valorFrete = volumeLiquido * frete;
   const custoMercadoria = valorProduto + valorFrete;
 
   // Tributos: cada um é uma alíquota em %, aplicada sobre o Volume Líquido (L).
@@ -827,6 +827,18 @@ function LancarCarga({ cadastros, config, onSave }) {
           <EquationBlock label="BS&W (%)" value={`${num(form.bsw).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%`} />
           <span style={{ fontSize: 22, color: C.textFaint }}>=</span>
           <EquationBlock label="BS&W (L)" value={fmtL(calc.bswL)} accent big />
+        </div>
+
+        <div style={{ height: 1, background: C.border, margin: "16px 0" }} />
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 14,
+          flexWrap: "wrap", fontFamily: MONO, padding: "8px 0",
+        }}>
+          <EquationBlock label="Volume c/ BSW" value={fmtL(calc.volumeComBSW)} />
+          <span style={{ fontSize: 22, color: C.textFaint }}>−</span>
+          <EquationBlock label="BS&W (L)" value={fmtL(calc.bswL)} />
+          <span style={{ fontSize: 22, color: C.textFaint }}>=</span>
+          <EquationBlock label="Volume líquido (L)" value={fmtL(calc.volumeLiquido)} accent big />
         </div>
       </Card>
       </div>

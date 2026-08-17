@@ -554,12 +554,15 @@ export default function App() {
         )}
         {tab === "historico" && (
           <Historico
-            cargas={cargas}
+            cargasEntrada={cargas}
+            cargasSaida={cargasSaida}
             cadastros={cadastros}
             config={config}
             isAdmin={isAdmin}
-            onDelete={(id) => { persistCargas(cargas.filter((c) => c.id !== id)); showToast("Registro excluído."); }}
-            onUpdate={(row) => { persistCargas(cargas.map((c) => (c.id === row.id ? row : c))); showToast("Registro atualizado."); }}
+            onDeleteEntrada={(id) => { persistCargas(cargas.filter((c) => c.id !== id)); showToast("Carga de entrada excluída."); }}
+            onUpdateEntrada={(row) => { persistCargas(cargas.map((c) => (c.id === row.id ? row : c))); showToast("Carga de entrada atualizada."); }}
+            onDeleteSaida={(id) => { persistCargasSaida(cargasSaida.filter((c) => c.id !== id)); showToast("Carga de saída excluída."); }}
+            onUpdateSaida={(row) => { persistCargasSaida(cargasSaida.map((c) => (c.id === row.id ? row : c))); showToast("Carga de saída atualizada."); }}
           />
         )}
         {tab === "painel" && <PainelResumo cargas={cargas} cadastros={cadastros} config={config} />}
@@ -917,10 +920,26 @@ function PreviewRow({ label, value, accent, warn, big }) {
 /* ---------------------------------------------------------------------
    TAB: HISTÓRICO
 --------------------------------------------------------------------- */
-function Historico({ cargas, cadastros, config, isAdmin, onDelete, onUpdate }) {
+function Historico({
+  cargasEntrada, cargasSaida, cadastros, config, isAdmin,
+  onDeleteEntrada, onUpdateEntrada, onDeleteSaida, onUpdateSaida,
+}) {
+  const [tipoHistorico, setTipoHistorico] = useState("entrada");
   const [monthFilter, setMonthFilter] = useState("todos");
   const [query, setQuery] = useState("");
   const [editingRow, setEditingRow] = useState(null);
+
+  const cargas = tipoHistorico === "entrada" ? cargasEntrada : cargasSaida;
+  const onDelete = tipoHistorico === "entrada" ? onDeleteEntrada : onDeleteSaida;
+  const onUpdate = tipoHistorico === "entrada" ? onUpdateEntrada : onUpdateSaida;
+  const tipoLabel = tipoHistorico === "entrada" ? "Entrada" : "Saída";
+
+  const trocarHistorico = (tipo) => {
+    setTipoHistorico(tipo);
+    setMonthFilter("todos");
+    setQuery("");
+    setEditingRow(null);
+  };
 
   const months = useMemo(() => {
     const s = new Set(cargas.map((c) => monthKey(c.data)));
@@ -954,7 +973,40 @@ function Historico({ cargas, cadastros, config, isAdmin, onDelete, onUpdate }) {
 
   return (
     <div>
-      <SectionTitle eyebrow={`${cargas.length} registros no total`} title="Histórico de Cargas" />
+      <SectionTitle
+        eyebrow={`${cargas.length} ${cargas.length === 1 ? "registro" : "registros"} de ${tipoLabel.toLowerCase()}`}
+        title={`Histórico de Cargas — ${tipoLabel}`}
+      />
+
+      <div style={{
+        display: "inline-flex", gap: 4, padding: 4, marginBottom: 16,
+        background: C.panel, border: `1px solid ${C.border}`, borderRadius: 6,
+      }}>
+        {[
+          { id: "entrada", label: `Cargas de Entrada (${cargasEntrada.length})`, icon: Plus },
+          { id: "saida", label: `Cargas de Saída (${cargasSaida.length})`, icon: Truck },
+        ].map((item) => {
+          const Icon = item.icon;
+          const active = tipoHistorico === item.id;
+          return (
+            <button
+              key={item.id}
+              onClick={() => trocarHistorico(item.id)}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 7, padding: "9px 14px",
+                background: active ? C.panelAlt : "transparent",
+                color: active ? C.accent : C.textDim,
+                border: `1px solid ${active ? C.borderLight : "transparent"}`,
+                borderBottom: active ? `2px solid ${C.accent}` : "2px solid transparent",
+                borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 700,
+                letterSpacing: "0.03em", textTransform: "uppercase",
+              }}
+            >
+              <Icon size={13} /> {item.label}
+            </button>
+          );
+        })}
+      </div>
 
       <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
         <div style={{ position: "relative", flex: "1 1 220px" }}>
@@ -973,7 +1025,7 @@ function Historico({ cargas, cadastros, config, isAdmin, onDelete, onUpdate }) {
       {filtered.length === 0 ? (
         <Card>
           <div style={{ textAlign: "center", padding: "30px 0", color: C.textDim, fontSize: 13 }}>
-            Nenhum registro ainda. Use "Lançar Carga" para começar.
+            Nenhuma carga de {tipoLabel.toLowerCase()} encontrada para os filtros selecionados.
           </div>
         </Card>
       ) : (

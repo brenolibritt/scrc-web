@@ -327,6 +327,7 @@ function SectionTitle({ eyebrow, title }) {
 export default function App() {
   const [tab, setTab] = useState("historico");
   const [cargas, setCargas] = useState([]);
+  const [cargasSaida, setCargasSaida] = useState([]);
   const [cadastros, setCadastros] = useState(SEED_CADASTROS);
   const [config, setConfig] = useState(SEED_CONFIG);
   const [loading, setLoading] = useState(true);
@@ -349,6 +350,10 @@ export default function App() {
       try {
         const c = await storageGet("scrc_cargas");
         if (c && c.value) setCargas(JSON.parse(c.value));
+      } catch (e) { /* no data yet */ }
+      try {
+        const cSaida = await storageGet("scrc_cargas_saida");
+        if (cSaida && cSaida.value) setCargasSaida(JSON.parse(cSaida.value));
       } catch (e) { /* no data yet */ }
       try {
         const r = await storageGet("scrc_cadastros");
@@ -375,6 +380,13 @@ export default function App() {
     } catch (e) { showToast("Não consegui salvar: " + (e?.message || "erro desconhecido") + (e?.hint ? " — " + e.hint : ""), "err"); console.error("Erro ao salvar:", e); }
   }, [showToast]);
 
+  const persistCargasSaida = useCallback(async (next) => {
+    setCargasSaida(next);
+    try {
+      await storageSet("scrc_cargas_saida", JSON.stringify(next));
+    } catch (e) { showToast("Não consegui salvar a carga de saída: " + (e?.message || "erro desconhecido") + (e?.hint ? " — " + e.hint : ""), "err"); console.error("Erro ao salvar carga de saída:", e); }
+  }, [showToast]);
+
   const persistCadastros = useCallback(async (next) => {
     setCadastros(next);
     try {
@@ -395,7 +407,8 @@ export default function App() {
   );
 
   const TABS = [
-    { id: "lancar", label: "Lançar Carga", icon: Plus },
+    { id: "lancar", label: "Lançar Entrada", icon: Plus },
+    { id: "lancar_saida", label: "Lançar Saída", icon: Truck },
     { id: "historico", label: "Histórico", icon: ClipboardList },
     { id: "painel", label: "Painel Resumo", icon: LayoutDashboard },
     { id: "cadastros", label: "Cadastros", icon: Warehouse },
@@ -517,12 +530,26 @@ export default function App() {
             <LancarCarga
               cadastros={cadastros}
               config={config}
+              tipo="entrada"
               onSave={(row) => {
-                persistCargas([...cargas, { ...row, id: uid() }]);
-                showToast("Carga registrada.");
+                persistCargas([...cargas, { ...row, id: uid(), movimento: "ENTRADA" }]);
+                showToast("Carga de entrada registrada.");
               }}
             />
           ) : <ReadOnlyNotice onEnter={() => setShowLogin(true)} text="Somente administradores podem lançar cargas." />
+        )}
+        {tab === "lancar_saida" && (
+          isAdmin ? (
+            <LancarCarga
+              cadastros={cadastros}
+              config={config}
+              tipo="saida"
+              onSave={(row) => {
+                persistCargasSaida([...cargasSaida, { ...row, id: uid(), movimento: "SAIDA" }]);
+                showToast("Carga de saída registrada.");
+              }}
+            />
+          ) : <ReadOnlyNotice onEnter={() => setShowLogin(true)} text="Somente administradores podem lançar cargas de saída." />
         )}
         {tab === "historico" && (
           <Historico
@@ -615,7 +642,7 @@ function ReadOnlyNotice({ text, onEnter }) {
 /* ---------------------------------------------------------------------
    TAB: LANÇAR CARGA
 --------------------------------------------------------------------- */
-function LancarCarga({ cadastros, config, onSave }) {
+function LancarCarga({ cadastros, config, onSave, tipo = "entrada" }) {
   const [form, setForm] = useState(() => ({
     ...emptyForm,
     produto: config.aplicarProdutoPadrao ? config.produtoPadrao : "",
@@ -624,6 +651,10 @@ function LancarCarga({ cadastros, config, onSave }) {
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   const calc = useMemo(() => computeCarga(form, cadastros.veiculos, config), [form, cadastros.veiculos, config]);
+  const isSaida = tipo === "saida";
+  const tituloLancamento = isSaida ? "Lançar Carga de Saída" : "Lançar Carga de Entrada";
+  const eyebrowLancamento = isSaida ? "Nova saída" : "Nova entrada";
+  const textoBotao = isSaida ? "Registrar saída" : "Registrar entrada";
 
   const produtosAtivos = cadastros.produtos.filter((p) => p.status === "ATIVO");
   const tanquesAtivos = cadastros.tanques.filter((t) => t.status === "ATIVO");
@@ -647,7 +678,7 @@ function LancarCarga({ cadastros, config, onSave }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 20 }} className="scrc-grid">
       <Card>
-        <SectionTitle eyebrow="Nova entrada" title="Lançar Carga" />
+        <SectionTitle eyebrow={eyebrowLancamento} title={tituloLancamento} />
 
         <div style={{ display: "grid", gap: 14 }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
@@ -718,7 +749,7 @@ function LancarCarga({ cadastros, config, onSave }) {
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
-            <Field label="Tanque destino" required>
+            <Field label={isSaida ? "Tanque origem" : "Tanque destino"} required>
               <Select value={form.tanque} onChange={set("tanque")}>
                 <option value="">Selecione…</option>
                 {tanquesAtivos.map((t) => <option key={t.id} value={t.nome}>{t.nome}</option>)}
@@ -738,7 +769,7 @@ function LancarCarga({ cadastros, config, onSave }) {
 
           <div style={{ marginTop: 6 }}>
             <Btn onClick={submit} style={!requiredOk ? { opacity: 0.4, pointerEvents: "none" } : {}}>
-              <Save size={14} /> Registrar carga
+              <Save size={14} /> {textoBotao}
             </Btn>
             {!requiredOk && (
               <span style={{ marginLeft: 12, fontSize: 12, color: C.textFaint }}>

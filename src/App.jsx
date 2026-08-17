@@ -101,7 +101,8 @@ function computeCarga(row, veiculos, config) {
   const icms = volumeLiquido * (num(row.icms) / 100);
   const pis = volumeLiquido * (num(row.pis) / 100);
   const cofins = volumeLiquido * (num(row.cofins) / 100);
-  const totalTributos = icms + pis + cofins;
+  const cide = volumeLiquido * (num(row.cide) / 100);
+  const totalTributos = icms + pis + cofins + cide;
 
   const valorTotal = custoMercadoria + totalTributos;
   const tp = tempoPatio(row.chegada, row.saida);
@@ -114,7 +115,7 @@ function computeCarga(row, veiculos, config) {
 
   return {
     pesoLiquido, volumeComBSW, bswL, volumeLiquido, divergencia, divergenciaAlta,
-    valorProduto, valorFrete, custoMercadoria, icms, pis, cofins, totalTributos,
+    valorProduto, valorFrete, custoMercadoria, icms, pis, cofins, cide, totalTributos,
     valorTotal, tempoMin: tp, transportadora, placaCadastrada, unidadeDivergencia: unidade,
   };
 }
@@ -137,7 +138,7 @@ const STATUS_STYLE = {
 const emptyForm = {
   data: "", chegada: "", saida: "", placa: "", motorista: "", notaFiscal: "", fornecedor: "", produto: "",
   api: "", ofertado: "", pesoBruto: "", drenagem: "0", tara: "", densidade: "",
-  bsw: "", tanque: "", custoUnit: "", frete: "", icms: "0", pis: "0", cofins: "0", status: "PENDENTE",
+  bsw: "", tanque: "", custoUnit: "", frete: "", icms: "0", pis: "0", cofins: "0", cide: "0", status: "PENDENTE",
   observacoes: "", lote: "",
 };
 
@@ -742,10 +743,13 @@ function LancarCarga({ cadastros, config, onSave, tipo = "entrada" }) {
           <div style={{ fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: C.textDim, fontWeight: 600, marginTop: 4 }}>
             Tributos (%, aplicados sobre o Volume Líquido)
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: isSaida ? "repeat(4,1fr)" : "repeat(3,1fr)", gap: 12 }}>
             <Field label="ICMS (%)" hint="ex: 18 para 18%"><Input type="number" step="0.01" value={form.icms} onChange={set("icms")} /></Field>
             <Field label="PIS (%)" hint="ex: 1,65 para 1,65%"><Input type="number" step="0.01" value={form.pis} onChange={set("pis")} /></Field>
             <Field label="COFINS (%)" hint="ex: 7,6 para 7,6%"><Input type="number" step="0.01" value={form.cofins} onChange={set("cofins")} /></Field>
+            {isSaida && (
+              <Field label="CIDE (%)" hint="aplicado sobre o Volume Líquido"><Input type="number" step="0.01" value={form.cide} onChange={set("cide")} /></Field>
+            )}
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
@@ -802,6 +806,7 @@ function LancarCarga({ cadastros, config, onSave, tipo = "entrada" }) {
           <PreviewRow label="ICMS" value={fmtR(calc.icms)} />
           <PreviewRow label="PIS" value={fmtR(calc.pis)} />
           <PreviewRow label="COFINS" value={fmtR(calc.cofins)} />
+          {isSaida && <PreviewRow label="CIDE" value={fmtR(calc.cide)} />}
           <PreviewRow label="Total de tributos" value={fmtR(calc.totalTributos)} />
           <div style={{ height: 1, background: C.border, margin: "6px 0" }} />
           <PreviewRow label="Valor total" value={fmtR(calc.valorTotal)} big />

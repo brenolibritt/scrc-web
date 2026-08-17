@@ -101,7 +101,7 @@ function computeCarga(row, veiculos, config) {
   const icms = volumeLiquido * (num(row.icms) / 100);
   const pis = volumeLiquido * (num(row.pis) / 100);
   const cofins = volumeLiquido * (num(row.cofins) / 100);
-  const cide = volumeLiquido * (num(row.cide) / 100);
+  const cide = volumeLiquido * num(row.cide);
   const totalTributos = icms + pis + cofins + cide;
 
   const valorTotal = custoMercadoria + totalTributos;
@@ -751,7 +751,7 @@ function LancarCarga({ cadastros, config, onSave, tipo = "entrada" }) {
             <Field label="PIS (%)" hint="ex: 1,65 para 1,65%"><Input type="number" step="0.01" value={form.pis} onChange={set("pis")} /></Field>
             <Field label="COFINS (%)" hint="ex: 7,6 para 7,6%"><Input type="number" step="0.01" value={form.cofins} onChange={set("cofins")} /></Field>
             {isSaida && (
-              <Field label="CIDE (%)" hint="aplicado sobre o Volume Líquido"><Input type="number" step="0.01" value={form.cide} onChange={set("cide")} /></Field>
+              <Field label="CIDE (R$/L)" hint="valor literal por litro aplicado sobre o Volume Líquido"><Input type="number" step="0.01" value={form.cide} onChange={set("cide")} /></Field>
             )}
           </div>
 

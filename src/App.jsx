@@ -413,7 +413,9 @@ export default function App() {
     const autorizado = await syncAdminSession(data?.session || null);
     if (!autorizado) {
       await supabase.auth.signOut();
-      throw new Error("Usuário autenticado, mas sem perfil administrativo ativo no SCRC.");
+      const accessError = new Error("Usuário autenticado, mas sem perfil administrativo ativo no SCRC.");
+      accessError.code = "SCRC_ADMIN_NOT_AUTHORIZED";
+      throw accessError;
     }
   }, [syncAdminSession]);
 
@@ -706,7 +708,12 @@ function LoginModal({ onClose, onSubmit }) {
       await onSubmit(email, pwd);
     } catch (error) {
       console.error("Falha no login administrativo:", error);
-      setErrorMsg("E-mail ou senha inválidos.");
+
+      if (error?.code === "SCRC_ADMIN_NOT_AUTHORIZED") {
+        setErrorMsg("Acesso não autorizado. Este usuário não possui permissão de administrador.");
+      } else {
+        setErrorMsg("E-mail ou senha inválidos.");
+      }
     } finally {
       setSubmitting(false);
     }

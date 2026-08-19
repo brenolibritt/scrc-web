@@ -335,38 +335,73 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
   const [authReady, setAuthReady] = useState(false);
+  const [adminProfile, setAdminProfile] = useState("");
 
   const showToast = useCallback((msg, kind = "ok") => {
     setToast({ msg, kind });
     setTimeout(() => setToast(null), kind === "err" ? 8000 : 2600);
   }, []);
 
-  // Mantém o Modo Admin sincronizado com a sessão real do Supabase Auth.
+  const syncAdminSession = useCallback(async (session) => {
+    const user = session?.user;
+
+    if (!user) {
+      setIsAdmin(false);
+      setAdminProfile("");
+      setAuthReady(true);
+      return false;
+    }
+
+    const { data: profile, error } = await supabase
+      .from("scrc_admins")
+      .select("perfil, ativo")
+      .eq("user_id", user.id)
+      .eq("ativo", true)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Erro ao consultar perfil administrativo:", error);
+      setIsAdmin(false);
+      setAdminProfile("");
+      setAuthReady(true);
+      return false;
+    }
+
+    const autorizado = !!profile?.ativo && !!profile?.perfil;
+    setIsAdmin(autorizado);
+    setAdminProfile(autorizado ? profile.perfil : "");
+    setAuthReady(true);
+    return autorizado;
+  }, []);
+
+  // Mantém o Modo Admin sincronizado com a sessão real do Supabase Auth
+  // e com o perfil autorizado em public.scrc_admins.
   useEffect(() => {
     let mounted = true;
 
-    supabase.auth.getSession().then(({ data, error }) => {
+    supabase.auth.getSession().then(async ({ data, error }) => {
       if (!mounted) return;
       if (error) {
         console.error("Erro ao recuperar sessão do Supabase:", error);
+        setAuthReady(true);
+        return;
       }
-      setIsAdmin(!!data?.session?.user);
-      setAuthReady(true);
+      await syncAdminSession(data?.session || null);
     });
 
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setIsAdmin(!!session?.user);
-      setAuthReady(true);
+      if (!mounted) return;
+      void syncAdminSession(session);
     });
 
     return () => {
       mounted = false;
       authListener.subscription.unsubscribe();
     };
-  }, []);
+  }, [syncAdminSession]);
 
   const handleAdminLogin = useCallback(async (email, password) => {
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signInWithPassword({
       email: email.trim(),
       password,
     });
@@ -374,7 +409,13 @@ export default function App() {
     if (error) {
       throw error;
     }
-  }, []);
+
+    const autorizado = await syncAdminSession(data?.session || null);
+    if (!autorizado) {
+      await supabase.auth.signOut();
+      throw new Error("Usuário autenticado, mas sem perfil administrativo ativo no SCRC.");
+    }
+  }, [syncAdminSession]);
 
   const handleAdminLogout = useCallback(async () => {
     const { error } = await supabase.auth.signOut();
@@ -383,6 +424,8 @@ export default function App() {
       console.error("Erro ao sair do Supabase Auth:", error);
       return;
     }
+    setIsAdmin(false);
+    setAdminProfile("");
     setShowLogin(false);
     setTab("historico");
     showToast("Sessão administrativa encerrada.");
@@ -528,6 +571,22 @@ export default function App() {
           {isAdmin ? (
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <Pill text="Modo admin" fg={C.accent} bg={`${C.accentDim}33`} />
+              {adminProfile && (
+                <div
+                  title={`Perfil administrativo: ${adminProfile}`}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    background: C.panelAlt, border: `1px solid ${C.border}`, borderRadius: 4,
+                    color: C.textDim, padding: "7px 10px", fontSize: 11.5, fontWeight: 600,
+                    maxWidth: 300,
+                  }}
+                >
+                  <Users size={13} color={C.accent} style={{ flexShrink: 0 }} />
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {adminProfile}
+                  </span>
+                </div>
+              )}
               <button onClick={handleAdminLogout}
                 title="Sair do modo admin"
                 style={{

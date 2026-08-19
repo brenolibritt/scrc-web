@@ -342,6 +342,22 @@ export default function App() {
     setTimeout(() => setToast(null), kind === "err" ? 8000 : 2600);
   }, []);
 
+  const getAdminProfile = useCallback(async (userId) => {
+    const { data: profile, error } = await supabase
+      .from("scrc_admins")
+      .select("perfil, ativo")
+      .eq("user_id", userId)
+      .eq("ativo", true)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Erro ao consultar perfil administrativo:", error);
+      return null;
+    }
+
+    return profile?.ativo && profile?.perfil ? profile : null;
+  }, []);
+
   const syncAdminSession = useCallback(async (session) => {
     const user = session?.user;
 
@@ -352,27 +368,29 @@ export default function App() {
       return false;
     }
 
-    const { data: profile, error } = await supabase
-      .from("scrc_admins")
-      .select("perfil, ativo")
-      .eq("user_id", user.id)
-      .eq("ativo", true)
-      .maybeSingle();
-
-    if (error) {
-      console.error("Erro ao consultar perfil administrativo:", error);
+    const profile = await getAdminProfile(user.id);
+    if (!profile) {
       setIsAdmin(false);
       setAdminProfile("");
       setAuthReady(true);
       return false;
     }
 
-    const autorizado = !!profile?.ativo && !!profile?.perfil;
-    setIsAdmin(autorizado);
-    setAdminProfile(autorizado ? profile.perfil : "");
+    const { data: aal, error: aalError } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (aalError) {
+      console.error("Erro ao verificar nível MFA:", aalError);
+      setIsAdmin(false);
+      setAdminProfile("");
+      setAuthReady(true);
+      return false;
+    }
+
+    const mfaValidado = aal?.currentLevel === "aal2";
+    setIsAdmin(mfaValidado);
+    setAdminProfile(mfaValidado ? profile.perfil : "");
     setAuthReady(true);
-    return autorizado;
-  }, []);
+    return mfaValidado;
+  }, [getAdminProfile]);
 
   // Mantém o Modo Admin sincronizado com a sessão real do Supabase Auth
   // e com o perfil autorizado em public.scrc_admins.
@@ -406,18 +424,80 @@ export default function App() {
       password,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
-    const autorizado = await syncAdminSession(data?.session || null);
-    if (!autorizado) {
+    const user = data?.user || data?.session?.user;
+    const profile = user ? await getAdminProfile(user.id) : null;
+
+    if (!profile) {
       await supabase.auth.signOut();
       const accessError = new Error("Usuário autenticado, mas sem perfil administrativo ativo no SCRC.");
       accessError.code = "SCRC_ADMIN_NOT_AUTHORIZED";
       throw accessError;
     }
+
+    const { data: factors, error: factorsError } = await supabase.auth.mfa.listFactors();
+    if (factorsError) throw factorsError;
+
+    const verifiedTotp = factors?.totp?.find((factor) => factor.status === "verified");
+    if (verifiedTotp) {
+      return {
+        step: "verify",
+        factorId: verifiedTotp.id,
+        profile: profile.perfil,
+      };
+    }
+
+    // Evita acumular fatores TOTP não concluídos após tentativas anteriores de cadastro.
+    const pendingTotp = factors?.totp?.filter((factor) => factor.status !== "verified") || [];
+    for (const factor of pendingTotp) {
+      try { await supabase.auth.mfa.unenroll({ factorId: factor.id }); } catch (_) {}
+    }
+
+    const { data: enrollment, error: enrollError } = await supabase.auth.mfa.enroll({
+      factorType: "totp",
+      friendlyName: `SCRC - ${profile.perfil}`,
+    });
+
+    if (enrollError) throw enrollError;
+
+    return {
+      step: "enroll",
+      factorId: enrollment.id,
+      qrCode: enrollment.totp?.qr_code || "",
+      secret: enrollment.totp?.secret || "",
+      profile: profile.perfil,
+    };
+  }, [getAdminProfile]);
+
+  const handleMfaVerify = useCallback(async (factorId, code) => {
+    const { data: challenge, error: challengeError } = await supabase.auth.mfa.challenge({ factorId });
+    if (challengeError) throw challengeError;
+
+    const { error: verifyError } = await supabase.auth.mfa.verify({
+      factorId,
+      challengeId: challenge.id,
+      code: code.trim(),
+    });
+    if (verifyError) throw verifyError;
+
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError) throw sessionError;
+
+    const autorizado = await syncAdminSession(sessionData?.session || null);
+    if (!autorizado) {
+      const mfaError = new Error("O segundo fator não elevou a sessão administrativa para AAL2.");
+      mfaError.code = "SCRC_MFA_NOT_COMPLETED";
+      throw mfaError;
+    }
   }, [syncAdminSession]);
+
+  const handleLoginCancel = useCallback(async () => {
+    if (!isAdmin) {
+      try { await supabase.auth.signOut(); } catch (_) {}
+      setAdminProfile("");
+    }
+  }, [isAdmin]);
 
   const handleAdminLogout = useCallback(async () => {
     const { error } = await supabase.auth.signOut();
@@ -620,10 +700,12 @@ export default function App() {
       {showLogin && (
         <LoginModal
           onClose={() => setShowLogin(false)}
-          onSubmit={async (email, password) => {
-            await handleAdminLogin(email, password);
+          onCancel={handleLoginCancel}
+          onSubmit={handleAdminLogin}
+          onVerify={async (factorId, code) => {
+            await handleMfaVerify(factorId, code);
             setShowLogin(false);
-            showToast("Modo admin ativado com autenticação segura.");
+            showToast("Modo admin ativado com senha + MFA.");
           }}
         />
       )}
@@ -693,19 +775,41 @@ export default function App() {
   );
 }
 
-function LoginModal({ onClose, onSubmit }) {
+function LoginModal({ onClose, onCancel, onSubmit, onVerify }) {
   const [email, setEmail] = useState("");
   const [pwd, setPwd] = useState("");
+  const [stage, setStage] = useState("credentials");
+  const [factorId, setFactorId] = useState("");
+  const [qrCode, setQrCode] = useState("");
+  const [secret, setSecret] = useState("");
+  const [profile, setProfile] = useState("");
+  const [mfaCode, setMfaCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
-  const submit = async () => {
+  const closeSafely = async () => {
+    if (submitting) return;
+    await onCancel?.();
+    onClose();
+  };
+
+  const submitCredentials = async () => {
     if (!email.trim() || !pwd || submitting) return;
 
     setSubmitting(true);
     setErrorMsg("");
     try {
-      await onSubmit(email, pwd);
+      const result = await onSubmit(email, pwd);
+      setFactorId(result.factorId || "");
+      setProfile(result.profile || "");
+
+      if (result.step === "enroll") {
+        setQrCode(result.qrCode || "");
+        setSecret(result.secret || "");
+        setStage("enroll");
+      } else {
+        setStage("verify");
+      }
     } catch (error) {
       console.error("Falha no login administrativo:", error);
 
@@ -719,9 +823,29 @@ function LoginModal({ onClose, onSubmit }) {
     }
   };
 
+  const submitMfa = async () => {
+    const code = mfaCode.replace(/\D/g, "");
+    if (code.length !== 6 || !factorId || submitting) return;
+
+    setSubmitting(true);
+    setErrorMsg("");
+    try {
+      await onVerify(factorId, code);
+    } catch (error) {
+      console.error("Falha na validação MFA:", error);
+      setErrorMsg("Código do autenticador inválido ou expirado. Gere um novo código e tente novamente.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const qrSrc = qrCode
+    ? (qrCode.startsWith("data:") ? qrCode : `data:image/svg+xml;utf8,${encodeURIComponent(qrCode)}`)
+    : "";
+
   return (
     <div
-      onClick={onClose}
+      onClick={closeSafely}
       style={{
         position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 100,
         display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
@@ -729,68 +853,167 @@ function LoginModal({ onClose, onSubmit }) {
     >
       <div onClick={(e) => e.stopPropagation()} style={{
         background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8,
-        padding: 24, width: 340, maxWidth: "100%",
+        padding: 24, width: stage === "enroll" ? 410 : 340, maxWidth: "100%",
       }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Lock size={16} color={C.accent} />
             <span style={{ fontFamily: DISPLAY, fontWeight: 800, fontSize: 16, textTransform: "uppercase" }}>
-              Acesso admin
+              {stage === "credentials" ? "Acesso admin" : stage === "enroll" ? "Configurar MFA" : "Verificação MFA"}
             </span>
           </div>
-          <button onClick={onClose} style={{ background: "none", border: "none", color: C.textDim, cursor: "pointer" }}>
+          <button onClick={closeSafely} style={{ background: "none", border: "none", color: C.textDim, cursor: "pointer" }}>
             <X size={16} />
           </button>
         </div>
 
-        <div style={{ display: "grid", gap: 12 }}>
-          <Field label="E-mail">
-            <Input
-              type="email"
-              autoFocus
-              autoComplete="username"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
-              placeholder="seu@email.com"
-            />
-          </Field>
-          <Field label="Senha">
-            <Input
-              type="password"
-              autoComplete="current-password"
-              value={pwd}
-              onChange={(e) => setPwd(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
-            />
-          </Field>
-
-          {errorMsg && (
-            <div style={{
-              background: C.redBg, border: `1px solid ${C.red}55`, color: C.red,
-              borderRadius: 4, padding: "9px 10px", fontSize: 12.5,
-            }}>
-              {errorMsg}
+        {stage === "credentials" && (
+          <>
+            <div style={{ display: "grid", gap: 12 }}>
+              <Field label="E-mail">
+                <Input
+                  type="email"
+                  autoFocus
+                  autoComplete="username"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") submitCredentials(); }}
+                  placeholder="seu@email.com"
+                />
+              </Field>
+              <Field label="Senha">
+                <Input
+                  type="password"
+                  autoComplete="current-password"
+                  value={pwd}
+                  onChange={(e) => setPwd(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") submitCredentials(); }}
+                />
+              </Field>
             </div>
-          )}
-        </div>
 
-        <div style={{ marginTop: 16 }}>
-          <Btn
-            onClick={submit}
-            disabled={submitting || !email.trim() || !pwd}
-            style={{
-              width: "100%", justifyContent: "center",
-              opacity: submitting || !email.trim() || !pwd ? 0.55 : 1,
-              pointerEvents: submitting || !email.trim() || !pwd ? "none" : "auto",
-            }}
-          >
-            {submitting ? "Entrando…" : "Entrar"}
-          </Btn>
-        </div>
-        <div style={{ marginTop: 10, fontSize: 11, lineHeight: 1.45, color: C.textFaint }}>
-          A autenticação administrativa é validada pelo Supabase Auth.
-        </div>
+            <div style={{ marginTop: 16 }}>
+              <Btn
+                onClick={submitCredentials}
+                disabled={submitting || !email.trim() || !pwd}
+                style={{
+                  width: "100%", justifyContent: "center",
+                  opacity: submitting || !email.trim() || !pwd ? 0.55 : 1,
+                  pointerEvents: submitting || !email.trim() || !pwd ? "none" : "auto",
+                }}
+              >
+                {submitting ? "Validando…" : "Continuar"}
+              </Btn>
+            </div>
+            <div style={{ marginTop: 10, fontSize: 11, lineHeight: 1.45, color: C.textFaint }}>
+              O acesso administrativo exige senha e autenticação em dois fatores (MFA).
+            </div>
+          </>
+        )}
+
+        {stage === "enroll" && (
+          <>
+            <div style={{ fontSize: 12.5, color: C.textDim, lineHeight: 1.55, marginBottom: 14 }}>
+              Primeiro acesso com MFA para <strong style={{ color: C.text }}>{profile}</strong>.
+              Escaneie o QR Code no Microsoft Authenticator, Google Authenticator ou outro aplicativo TOTP.
+            </div>
+
+            {qrSrc && (
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
+                <div style={{ background: "#fff", padding: 10, borderRadius: 8 }}>
+                  <img src={qrSrc} alt="QR Code para configurar MFA" style={{ display: "block", width: 190, height: 190 }} />
+                </div>
+              </div>
+            )}
+
+            {secret && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 10.5, color: C.textDim, textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 5 }}>
+                  Chave manual (caso não consiga escanear)
+                </div>
+                <div style={{
+                  fontFamily: MONO, fontSize: 12, color: C.text, background: C.panelAlt,
+                  border: `1px solid ${C.border}`, borderRadius: 4, padding: "8px 10px",
+                  wordBreak: "break-all", userSelect: "all",
+                }}>
+                  {secret}
+                </div>
+              </div>
+            )}
+
+            <Field label="Código de 6 dígitos">
+              <Input
+                autoFocus
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={mfaCode}
+                onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                onKeyDown={(e) => { if (e.key === "Enter") submitMfa(); }}
+                placeholder="000000"
+                style={{ fontFamily: MONO, letterSpacing: ".18em", textAlign: "center", fontSize: 18 }}
+              />
+            </Field>
+
+            <div style={{ marginTop: 16 }}>
+              <Btn
+                onClick={submitMfa}
+                disabled={submitting || mfaCode.length !== 6}
+                style={{
+                  width: "100%", justifyContent: "center",
+                  opacity: submitting || mfaCode.length !== 6 ? 0.55 : 1,
+                  pointerEvents: submitting || mfaCode.length !== 6 ? "none" : "auto",
+                }}
+              >
+                {submitting ? "Ativando…" : "Ativar MFA e entrar"}
+              </Btn>
+            </div>
+          </>
+        )}
+
+        {stage === "verify" && (
+          <>
+            <div style={{ fontSize: 12.5, color: C.textDim, lineHeight: 1.55, marginBottom: 14 }}>
+              Abra o aplicativo autenticador vinculado ao SCRC e informe o código temporário de 6 dígitos.
+            </div>
+            <Field label="Código de 6 dígitos">
+              <Input
+                autoFocus
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={mfaCode}
+                onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                onKeyDown={(e) => { if (e.key === "Enter") submitMfa(); }}
+                placeholder="000000"
+                style={{ fontFamily: MONO, letterSpacing: ".18em", textAlign: "center", fontSize: 18 }}
+              />
+            </Field>
+
+            <div style={{ marginTop: 16 }}>
+              <Btn
+                onClick={submitMfa}
+                disabled={submitting || mfaCode.length !== 6}
+                style={{
+                  width: "100%", justifyContent: "center",
+                  opacity: submitting || mfaCode.length !== 6 ? 0.55 : 1,
+                  pointerEvents: submitting || mfaCode.length !== 6 ? "none" : "auto",
+                }}
+              >
+                {submitting ? "Verificando…" : "Verificar e entrar"}
+              </Btn>
+            </div>
+          </>
+        )}
+
+        {errorMsg && (
+          <div style={{
+            marginTop: 12, background: C.redBg, border: `1px solid ${C.red}55`, color: C.red,
+            borderRadius: 4, padding: "9px 10px", fontSize: 12.5,
+          }}>
+            {errorMsg}
+          </div>
+        )}
       </div>
     </div>
   );

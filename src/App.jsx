@@ -9,6 +9,7 @@ import {
   ResponsiveContainer
 } from "recharts";
 import { storageGet, storageSet } from "./lib/storage.js";
+import { supabase } from "./lib/supabaseClient.js";
 
 /* ---------------------------------------------------------------------
    TOKENS
@@ -121,10 +122,6 @@ function computeCarga(row, veiculos, config) {
 }
 
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-// Trava de conveniência apenas — não é segurança real (veja aviso no chat).
-// Peça pra trocar essa senha por outra a qualquer momento.
-const ADMIN_PASSWORD = "admin123";
 
 const STATUS_OPTIONS = ["PENDENTE", "RECEBIDO", "EM ANÁLISE", "CANCELADO"];
 const STATUS_SAIDA = "ENVIADO";
@@ -337,11 +334,59 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
 
   const showToast = useCallback((msg, kind = "ok") => {
     setToast({ msg, kind });
     setTimeout(() => setToast(null), kind === "err" ? 8000 : 2600);
   }, []);
+
+  // Mantém o Modo Admin sincronizado com a sessão real do Supabase Auth.
+  useEffect(() => {
+    let mounted = true;
+
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!mounted) return;
+      if (error) {
+        console.error("Erro ao recuperar sessão do Supabase:", error);
+      }
+      setIsAdmin(!!data?.session?.user);
+      setAuthReady(true);
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsAdmin(!!session?.user);
+      setAuthReady(true);
+    });
+
+    return () => {
+      mounted = false;
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  const handleAdminLogin = useCallback(async (email, password) => {
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+
+    if (error) {
+      throw error;
+    }
+  }, []);
+
+  const handleAdminLogout = useCallback(async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      showToast("Não foi possível encerrar a sessão administrativa.", "err");
+      console.error("Erro ao sair do Supabase Auth:", error);
+      return;
+    }
+    setShowLogin(false);
+    setTab("historico");
+    showToast("Sessão administrativa encerrada.");
+  }, [showToast]);
 
   useEffect(() => {
     if (!isAdmin && tab === "config") setTab("historico");
@@ -418,13 +463,13 @@ export default function App() {
     ...(isAdmin ? [{ id: "config", label: "Configurações", icon: Settings }] : []),
   ];
 
-  if (loading) {
+  if (loading || !authReady) {
     return (
       <div style={{
         background: C.bg, minHeight: 480, display: "flex", alignItems: "center",
         justifyContent: "center", color: C.textDim, fontFamily: MONO, fontSize: 13,
       }}>
-        carregando dados salvos…
+        carregando dados e sessão…
       </div>
     );
   }
@@ -483,7 +528,7 @@ export default function App() {
           {isAdmin ? (
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <Pill text="Modo admin" fg={C.accent} bg={`${C.accentDim}33`} />
-              <button onClick={() => setIsAdmin(false)}
+              <button onClick={handleAdminLogout}
                 title="Sair do modo admin"
                 style={{
                   display: "flex", alignItems: "center", gap: 6, background: "transparent",
@@ -514,14 +559,10 @@ export default function App() {
       {showLogin && (
         <LoginModal
           onClose={() => setShowLogin(false)}
-          onSubmit={(pwd) => {
-            if (pwd === ADMIN_PASSWORD) {
-              setIsAdmin(true);
-              setShowLogin(false);
-              showToast("Modo admin ativado.");
-            } else {
-              showToast("Senha incorreta.", "err");
-            }
+          onSubmit={async (email, password) => {
+            await handleAdminLogin(email, password);
+            setShowLogin(false);
+            showToast("Modo admin ativado com autenticação segura.");
           }}
         />
       )}
@@ -592,7 +633,26 @@ export default function App() {
 }
 
 function LoginModal({ onClose, onSubmit }) {
+  const [email, setEmail] = useState("");
   const [pwd, setPwd] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const submit = async () => {
+    if (!email.trim() || !pwd || submitting) return;
+
+    setSubmitting(true);
+    setErrorMsg("");
+    try {
+      await onSubmit(email, pwd);
+    } catch (error) {
+      console.error("Falha no login administrativo:", error);
+      setErrorMsg("E-mail ou senha inválidos.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <div
       onClick={onClose}
@@ -603,7 +663,7 @@ function LoginModal({ onClose, onSubmit }) {
     >
       <div onClick={(e) => e.stopPropagation()} style={{
         background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8,
-        padding: 24, width: 320, maxWidth: "100%",
+        padding: 24, width: 340, maxWidth: "100%",
       }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -616,19 +676,54 @@ function LoginModal({ onClose, onSubmit }) {
             <X size={16} />
           </button>
         </div>
-        <Field label="Senha">
-          <Input
-            type="password"
-            autoFocus
-            value={pwd}
-            onChange={(e) => setPwd(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") onSubmit(pwd); }}
-          />
-        </Field>
+
+        <div style={{ display: "grid", gap: 12 }}>
+          <Field label="E-mail">
+            <Input
+              type="email"
+              autoFocus
+              autoComplete="username"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+              placeholder="seu@email.com"
+            />
+          </Field>
+          <Field label="Senha">
+            <Input
+              type="password"
+              autoComplete="current-password"
+              value={pwd}
+              onChange={(e) => setPwd(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+            />
+          </Field>
+
+          {errorMsg && (
+            <div style={{
+              background: C.redBg, border: `1px solid ${C.red}55`, color: C.red,
+              borderRadius: 4, padding: "9px 10px", fontSize: 12.5,
+            }}>
+              {errorMsg}
+            </div>
+          )}
+        </div>
+
         <div style={{ marginTop: 16 }}>
-          <Btn onClick={() => onSubmit(pwd)} style={{ width: "100%", justifyContent: "center" }}>
-            Entrar
+          <Btn
+            onClick={submit}
+            disabled={submitting || !email.trim() || !pwd}
+            style={{
+              width: "100%", justifyContent: "center",
+              opacity: submitting || !email.trim() || !pwd ? 0.55 : 1,
+              pointerEvents: submitting || !email.trim() || !pwd ? "none" : "auto",
+            }}
+          >
+            {submitting ? "Entrando…" : "Entrar"}
           </Btn>
+        </div>
+        <div style={{ marginTop: 10, fontSize: 11, lineHeight: 1.45, color: C.textFaint }}>
+          A autenticação administrativa é validada pelo Supabase Auth.
         </div>
       </div>
     </div>

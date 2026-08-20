@@ -126,7 +126,7 @@ const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const STATUS_OPTIONS = ["PENDENTE", "RECEBIDO", "EM ANÁLISE", "CANCELADO"];
 const STATUS_SAIDA = "ENVIADO";
 
-const ADMIN_INACTIVITY_MS = 15 * 60 * 1000; // 15 minutos
+const ADMIN_INACTIVITY_MS = 1 * 60 * 1000; // 1 minuto para teste
 const ADMIN_LAST_ACTIVITY_KEY = "scrc_admin_last_activity";
 
 

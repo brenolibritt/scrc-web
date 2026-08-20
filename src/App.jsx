@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   Plus, Trash2, Pencil, Check, X, Fuel, Truck, Users, Building2,
   Gauge, ClipboardList, LayoutDashboard, AlertTriangle, Save,
@@ -125,6 +125,10 @@ const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 const STATUS_OPTIONS = ["PENDENTE", "RECEBIDO", "EM ANÁLISE", "CANCELADO"];
 const STATUS_SAIDA = "ENVIADO";
+
+const ADMIN_INACTIVITY_MS = 15 * 60 * 1000; // 15 minutos
+const ADMIN_LAST_ACTIVITY_KEY = "scrc_admin_last_activity";
+
 
 const STATUS_STYLE = {
   PENDENTE: { fg: C.yellow, bg: C.yellowBg },
@@ -336,6 +340,9 @@ export default function App() {
   const [showLogin, setShowLogin] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [adminProfile, setAdminProfile] = useState("");
+  const adminInactivityTimerRef = useRef(null);
+  const adminLastActivityRef = useRef(Date.now());
+  const adminAutoLogoutRunningRef = useRef(false);
 
   const showToast = useCallback((msg, kind = "ok") => {
     setToast({ msg, kind });
@@ -506,12 +513,101 @@ export default function App() {
       console.error("Erro ao sair do Supabase Auth:", error);
       return;
     }
+    try { localStorage.removeItem(ADMIN_LAST_ACTIVITY_KEY); } catch (_) {}
     setIsAdmin(false);
     setAdminProfile("");
     setShowLogin(false);
     setTab("historico");
     showToast("Sessão administrativa encerrada.");
   }, [showToast]);
+
+
+  // Encerra automaticamente o Modo Admin após 15 minutos sem interação.
+  // O visitante continua podendo usar as áreas de consulta normalmente.
+  useEffect(() => {
+    if (!isAdmin) {
+      if (adminInactivityTimerRef.current) {
+        clearTimeout(adminInactivityTimerRef.current);
+        adminInactivityTimerRef.current = null;
+      }
+      adminAutoLogoutRunningRef.current = false;
+      return;
+    }
+
+    const autoLogout = async () => {
+      if (adminAutoLogoutRunningRef.current) return;
+      adminAutoLogoutRunningRef.current = true;
+
+      try {
+        await supabase.auth.signOut();
+      } catch (error) {
+        console.error("Erro ao encerrar sessão administrativa por inatividade:", error);
+      } finally {
+        try { localStorage.removeItem(ADMIN_LAST_ACTIVITY_KEY); } catch (_) {}
+        setIsAdmin(false);
+        setAdminProfile("");
+        setShowLogin(false);
+        setTab("historico");
+        showToast("Modo admin encerrado automaticamente após 15 minutos de inatividade.");
+        adminAutoLogoutRunningRef.current = false;
+      }
+    };
+
+    const scheduleTimeout = () => {
+      if (adminInactivityTimerRef.current) clearTimeout(adminInactivityTimerRef.current);
+
+      const elapsed = Date.now() - adminLastActivityRef.current;
+      const remaining = Math.max(0, ADMIN_INACTIVITY_MS - elapsed);
+
+      adminInactivityTimerRef.current = setTimeout(autoLogout, remaining);
+    };
+
+    const registerActivity = () => {
+      const now = Date.now();
+      adminLastActivityRef.current = now;
+      try { localStorage.setItem(ADMIN_LAST_ACTIVITY_KEY, String(now)); } catch (_) {}
+      scheduleTimeout();
+    };
+
+    const checkElapsedTime = () => {
+      if (Date.now() - adminLastActivityRef.current >= ADMIN_INACTIVITY_MS) {
+        void autoLogout();
+      } else {
+        scheduleTimeout();
+      }
+    };
+
+    let storedLastActivity = 0;
+    try { storedLastActivity = Number(localStorage.getItem(ADMIN_LAST_ACTIVITY_KEY) || 0); } catch (_) {}
+
+    if (Number.isFinite(storedLastActivity) && storedLastActivity > 0) {
+      adminLastActivityRef.current = storedLastActivity;
+    } else {
+      adminLastActivityRef.current = Date.now();
+      try { localStorage.setItem(ADMIN_LAST_ACTIVITY_KEY, String(adminLastActivityRef.current)); } catch (_) {}
+    }
+
+    checkElapsedTime();
+
+    const activityEvents = ["pointerdown", "keydown", "touchstart", "scroll"];
+    activityEvents.forEach((eventName) =>
+      window.addEventListener(eventName, registerActivity, { passive: true })
+    );
+    window.addEventListener("focus", checkElapsedTime);
+    document.addEventListener("visibilitychange", checkElapsedTime);
+
+    return () => {
+      if (adminInactivityTimerRef.current) {
+        clearTimeout(adminInactivityTimerRef.current);
+        adminInactivityTimerRef.current = null;
+      }
+      activityEvents.forEach((eventName) =>
+        window.removeEventListener(eventName, registerActivity)
+      );
+      window.removeEventListener("focus", checkElapsedTime);
+      document.removeEventListener("visibilitychange", checkElapsedTime);
+    };
+  }, [isAdmin, showToast]);
 
   useEffect(() => {
     if (!isAdmin && tab === "config") setTab("historico");

@@ -369,42 +369,88 @@ export default function App() {
     return profile?.ativo && profile?.perfil ? profile : null;
   }, []);
 
-  const syncAdminSession = useCallback(async (session) => {
+  const getLaboratorioProfile = useCallback(async (userId) => {
+    const { data: profile, error } = await supabase
+      .from("scrc_laboratorio_usuarios")
+      .select("perfil, ativo")
+      .eq("user_id", userId)
+      .eq("ativo", true)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Erro ao consultar perfil do Laboratório:", error);
+      return null;
+    }
+
+    return profile?.ativo && profile?.perfil ? profile : null;
+  }, []);
+
+  const syncRestrictedSession = useCallback(async (session) => {
     const user = session?.user;
 
     if (!user) {
       setIsAdmin(false);
+      setIsLaboratorio(false);
       setAdminProfile("");
+      setLaboratorioProfile("");
       setAuthReady(true);
       return false;
     }
 
-    const profile = await getAdminProfile(user.id);
-    if (!profile) {
+    const [adminProfileResult, laboratorioProfileResult] = await Promise.all([
+      getAdminProfile(user.id),
+      getLaboratorioProfile(user.id),
+    ]);
+
+    const accessType = adminProfileResult
+      ? "admin"
+      : laboratorioProfileResult
+        ? "laboratorio"
+        : null;
+
+    if (!accessType) {
       setIsAdmin(false);
+      setIsLaboratorio(false);
       setAdminProfile("");
+      setLaboratorioProfile("");
       setAuthReady(true);
       return false;
     }
 
-    const { data: aal, error: aalError } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    const { data: aal, error: aalError } =
+      await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+
     if (aalError) {
       console.error("Erro ao verificar nível MFA:", aalError);
       setIsAdmin(false);
+      setIsLaboratorio(false);
       setAdminProfile("");
+      setLaboratorioProfile("");
       setAuthReady(true);
       return false;
     }
 
     const mfaValidado = aal?.currentLevel === "aal2";
-    setIsAdmin(mfaValidado);
-    setAdminProfile(mfaValidado ? profile.perfil : "");
-    setAuthReady(true);
-    return mfaValidado;
-  }, [getAdminProfile]);
 
-  // Mantém o Modo Admin sincronizado com a sessão real do Supabase Auth
-  // e com o perfil autorizado em public.scrc_admins.
+    setIsAdmin(mfaValidado && accessType === "admin");
+    setIsLaboratorio(mfaValidado && accessType === "laboratorio");
+    setAdminProfile(
+      mfaValidado && accessType === "admin"
+        ? adminProfileResult.perfil
+        : ""
+    );
+    setLaboratorioProfile(
+      mfaValidado && accessType === "laboratorio"
+        ? laboratorioProfileResult.perfil
+        : ""
+    );
+    setAuthReady(true);
+
+    return mfaValidado;
+  }, [getAdminProfile, getLaboratorioProfile]);
+
+  // Mantém o acesso restrito sincronizado com a sessão real do Supabase Auth.
+  // Reconhece Administrador ou Laboratório, sempre com MFA/AAL2.
   useEffect(() => {
     let mounted = true;
 
@@ -415,21 +461,21 @@ export default function App() {
         setAuthReady(true);
         return;
       }
-      await syncAdminSession(data?.session || null);
+      await syncRestrictedSession(data?.session || null);
     });
 
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!mounted) return;
-      void syncAdminSession(session);
+      void syncRestrictedSession(session);
     });
 
     return () => {
       mounted = false;
       authListener.subscription.unsubscribe();
     };
-  }, [syncAdminSession]);
+  }, [syncRestrictedSession]);
 
-  const handleAdminLogin = useCallback(async (email, password) => {
+  const handleRestrictedLogin = useCallback(async (email, password) => {
     const { data, error } = await supabase.auth.signInWithPassword({
       email: email.trim(),
       password,
@@ -438,37 +484,62 @@ export default function App() {
     if (error) throw error;
 
     const user = data?.user || data?.session?.user;
-    const profile = user ? await getAdminProfile(user.id) : null;
 
-    if (!profile) {
+    const [adminProfileResult, laboratorioProfileResult] = user
+      ? await Promise.all([
+          getAdminProfile(user.id),
+          getLaboratorioProfile(user.id),
+        ])
+      : [null, null];
+
+    const accessProfile = adminProfileResult || laboratorioProfileResult;
+    const accessType = adminProfileResult
+      ? "admin"
+      : laboratorioProfileResult
+        ? "laboratorio"
+        : null;
+
+    if (!accessProfile || !accessType) {
       await supabase.auth.signOut();
-      const accessError = new Error("Usuário autenticado, mas sem perfil administrativo ativo no SCRC.");
-      accessError.code = "SCRC_ADMIN_NOT_AUTHORIZED";
+      const accessError = new Error(
+        "Usuário autenticado, mas sem perfil ativo de Administrador ou Laboratório no SCRC."
+      );
+      accessError.code = "SCRC_RESTRICTED_NOT_AUTHORIZED";
       throw accessError;
     }
 
-    const { data: factors, error: factorsError } = await supabase.auth.mfa.listFactors();
+    const { data: factors, error: factorsError } =
+      await supabase.auth.mfa.listFactors();
+
     if (factorsError) throw factorsError;
 
-    const verifiedTotp = factors?.totp?.find((factor) => factor.status === "verified");
+    const verifiedTotp = factors?.totp?.find(
+      (factor) => factor.status === "verified"
+    );
+
     if (verifiedTotp) {
       return {
         step: "verify",
         factorId: verifiedTotp.id,
-        profile: profile.perfil,
+        profile: accessProfile.perfil,
+        accessType,
       };
     }
 
-    // Evita acumular fatores TOTP não concluídos após tentativas anteriores de cadastro.
-    const pendingTotp = factors?.totp?.filter((factor) => factor.status !== "verified") || [];
+    const pendingTotp =
+      factors?.totp?.filter((factor) => factor.status !== "verified") || [];
+
     for (const factor of pendingTotp) {
-      try { await supabase.auth.mfa.unenroll({ factorId: factor.id }); } catch (_) {}
+      try {
+        await supabase.auth.mfa.unenroll({ factorId: factor.id });
+      } catch (_) {}
     }
 
-    const { data: enrollment, error: enrollError } = await supabase.auth.mfa.enroll({
-      factorType: "totp",
-      friendlyName: `SCRC - ${profile.perfil}`,
-    });
+    const { data: enrollment, error: enrollError } =
+      await supabase.auth.mfa.enroll({
+        factorType: "totp",
+        friendlyName: `SCRC - ${accessProfile.perfil}`,
+      });
 
     if (enrollError) throw enrollError;
 
@@ -477,9 +548,10 @@ export default function App() {
       factorId: enrollment.id,
       qrCode: enrollment.totp?.qr_code || "",
       secret: enrollment.totp?.secret || "",
-      profile: profile.perfil,
+      profile: accessProfile.perfil,
+      accessType,
     };
-  }, [getAdminProfile]);
+  }, [getAdminProfile, getLaboratorioProfile]);
 
   const handleMfaVerify = useCallback(async (factorId, code) => {
     const { data: challenge, error: challengeError } = await supabase.auth.mfa.challenge({ factorId });
@@ -495,41 +567,46 @@ export default function App() {
     const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
     if (sessionError) throw sessionError;
 
-    const autorizado = await syncAdminSession(sessionData?.session || null);
+    const autorizado = await syncRestrictedSession(sessionData?.session || null);
     if (!autorizado) {
-      const mfaError = new Error("O segundo fator não elevou a sessão administrativa para AAL2.");
+      const mfaError = new Error("O segundo fator não elevou a sessão restrita para AAL2.");
       mfaError.code = "SCRC_MFA_NOT_COMPLETED";
       throw mfaError;
     }
-  }, [syncAdminSession]);
+  }, [syncRestrictedSession]);
 
   const handleLoginCancel = useCallback(async () => {
-    if (!isAdmin) {
+    if (!isAdmin && !isLaboratorio) {
       try { await supabase.auth.signOut(); } catch (_) {}
       setAdminProfile("");
+      setLaboratorioProfile("");
     }
-  }, [isAdmin]);
+  }, [isAdmin, isLaboratorio]);
 
-  const handleAdminLogout = useCallback(async () => {
+  const handleRestrictedLogout = useCallback(async () => {
     const { error } = await supabase.auth.signOut();
     if (error) {
-      showToast("Não foi possível encerrar a sessão administrativa.", "err");
+      showToast("Não foi possível encerrar a sessão.", "err");
       console.error("Erro ao sair do Supabase Auth:", error);
       return;
     }
+
     try { localStorage.removeItem(ADMIN_LAST_ACTIVITY_KEY); } catch (_) {}
+
     setIsAdmin(false);
+    setIsLaboratorio(false);
     setAdminProfile("");
+    setLaboratorioProfile("");
     setShowLogin(false);
     setTab("historico");
-    showToast("Sessão administrativa encerrada.");
+    showToast("Sessão encerrada.");
   }, [showToast]);
 
 
   // Encerra automaticamente o Modo Admin após 15 minutos sem interação.
   // O visitante continua podendo usar as áreas de consulta normalmente.
   useEffect(() => {
-    if (!isAdmin) {
+    if (!isAdmin && !isLaboratorio) {
       if (adminInactivityTimerRef.current) {
         clearTimeout(adminInactivityTimerRef.current);
         adminInactivityTimerRef.current = null;
@@ -549,10 +626,12 @@ export default function App() {
       } finally {
         try { localStorage.removeItem(ADMIN_LAST_ACTIVITY_KEY); } catch (_) {}
         setIsAdmin(false);
+        setIsLaboratorio(false);
         setAdminProfile("");
+        setLaboratorioProfile("");
         setShowLogin(false);
         setTab("historico");
-        showToast("Modo admin encerrado automaticamente após 15 minutos de inatividade.");
+        showToast("Sessão restrita encerrada automaticamente após 15 minutos de inatividade.");
         adminAutoLogoutRunningRef.current = false;
       }
     };
@@ -611,7 +690,7 @@ export default function App() {
       window.removeEventListener("focus", checkElapsedTime);
       document.removeEventListener("visibilitychange", checkElapsedTime);
     };
-  }, [isAdmin, showToast]);
+  }, [isAdmin, isLaboratorio, showToast]);
 
   useEffect(() => {
     if (!isAdmin && tab === "config") setTab("historico");
@@ -679,14 +758,16 @@ export default function App() {
     [cadastros.veiculos]
   );
 
-  const TABS = [
-    { id: "lancar", label: "Lançar Entrada", icon: Plus },
-    { id: "lancar_saida", label: "Lançar Saída", icon: Truck },
-    { id: "historico", label: "Histórico", icon: ClipboardList },
-    { id: "painel", label: "Painel Resumo", icon: LayoutDashboard },
-    { id: "cadastros", label: "Cadastros", icon: Warehouse },
-    ...(isAdmin ? [{ id: "config", label: "Configurações", icon: Settings }] : []),
-  ];
+  const TABS = isLaboratorio
+    ? []
+    : [
+        { id: "lancar", label: "Lançar Entrada", icon: Plus },
+        { id: "lancar_saida", label: "Lançar Saída", icon: Truck },
+        { id: "historico", label: "Histórico", icon: ClipboardList },
+        { id: "painel", label: "Painel Resumo", icon: LayoutDashboard },
+        { id: "cadastros", label: "Cadastros", icon: Warehouse },
+        ...(isAdmin ? [{ id: "config", label: "Configurações", icon: Settings }] : []),
+      ];
 
   if (loading || !authReady) {
     return (
@@ -769,8 +850,38 @@ export default function App() {
                   </span>
                 </div>
               )}
-              <button onClick={handleAdminLogout}
+              <button onClick={handleRestrictedLogout}
                 title="Sair do modo admin"
+                style={{
+                  display: "flex", alignItems: "center", gap: 6, background: "transparent",
+                  border: `1px solid ${C.border}`, borderRadius: 4, color: C.textDim,
+                  padding: "8px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer",
+                  textTransform: "uppercase", letterSpacing: "0.03em",
+                }}>
+                <Unlock size={13} /> Sair
+              </button>
+            </div>
+          ) : isLaboratorio ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <Pill text="Modo laboratório" fg={C.steel} bg="#1B2530" />
+              {laboratorioProfile && (
+                <div
+                  title={`Perfil: ${laboratorioProfile}`}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    background: C.panelAlt, border: `1px solid ${C.border}`, borderRadius: 4,
+                    color: C.textDim, padding: "7px 10px", fontSize: 11.5, fontWeight: 600,
+                    maxWidth: 300,
+                  }}
+                >
+                  <Users size={13} color={C.steel} style={{ flexShrink: 0 }} />
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {laboratorioProfile}
+                  </span>
+                </div>
+              )}
+              <button onClick={handleRestrictedLogout}
+                title="Sair do modo laboratório"
                 style={{
                   display: "flex", alignItems: "center", gap: 6, background: "transparent",
                   border: `1px solid ${C.border}`, borderRadius: 4, color: C.textDim,
@@ -790,7 +901,7 @@ export default function App() {
                   padding: "8px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer",
                   textTransform: "uppercase", letterSpacing: "0.03em",
                 }}>
-                <Lock size={13} /> Entrar como admin
+                <Lock size={13} /> Acesso restrito
               </button>
             </div>
           )}
@@ -801,17 +912,33 @@ export default function App() {
         <LoginModal
           onClose={() => setShowLogin(false)}
           onCancel={handleLoginCancel}
-          onSubmit={handleAdminLogin}
+          onSubmit={handleRestrictedLogin}
           onVerify={async (factorId, code) => {
             await handleMfaVerify(factorId, code);
             setShowLogin(false);
-            showToast("Modo admin ativado com senha + MFA.");
+            showToast(
+              isLaboratorio
+                ? "Modo laboratório ativado com senha + MFA."
+                : "Modo admin ativado com senha + MFA."
+            );
           }}
         />
       )}
 
       {/* CONTENT */}
       <div style={{ padding: 24 }}>
+        {isLaboratorio ? (
+          <Card style={{ textAlign: "center", padding: "48px 24px" }}>
+            <Gauge size={30} color={C.steel} style={{ marginBottom: 12 }} />
+            <SectionTitle eyebrow="Acesso autorizado" title="Módulo Laboratório" />
+            <div style={{ color: C.textDim, fontSize: 14, lineHeight: 1.6, maxWidth: 620, margin: "0 auto" }}>
+              Perfil do Laboratório reconhecido com sucesso. Nesta etapa, o acesso às áreas
+              administrativas permanece bloqueado. A tela exclusiva para lançamento de
+              Temperatura, Densidade e API será adicionada no próximo passo.
+            </div>
+          </Card>
+        ) : (
+          <>
         {tab === "lancar" && (
           isAdmin ? (
             <LancarCarga
@@ -857,6 +984,8 @@ export default function App() {
         )}
         {tab === "config" && isAdmin && (
           <Configuracoes config={config} cadastros={cadastros} onSave={(next) => { persistConfig(next); showToast("Configurações salvas."); }} />
+        )}
+          </>
         )}
       </div>
 
@@ -911,10 +1040,10 @@ function LoginModal({ onClose, onCancel, onSubmit, onVerify }) {
         setStage("verify");
       }
     } catch (error) {
-      console.error("Falha no login administrativo:", error);
+      console.error("Falha no acesso restrito:", error);
 
-      if (error?.code === "SCRC_ADMIN_NOT_AUTHORIZED") {
-        setErrorMsg("Acesso não autorizado. Este usuário não possui permissão de administrador.");
+      if (error?.code === "SCRC_RESTRICTED_NOT_AUTHORIZED") {
+        setErrorMsg("Acesso não autorizado. Este usuário não possui perfil ativo de Administrador ou Laboratório.");
       } else {
         setErrorMsg("E-mail ou senha inválidos.");
       }
@@ -959,7 +1088,7 @@ function LoginModal({ onClose, onCancel, onSubmit, onVerify }) {
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Lock size={16} color={C.accent} />
             <span style={{ fontFamily: DISPLAY, fontWeight: 800, fontSize: 16, textTransform: "uppercase" }}>
-              {stage === "credentials" ? "Acesso admin" : stage === "enroll" ? "Configurar MFA" : "Verificação MFA"}
+              {stage === "credentials" ? "Acesso restrito" : stage === "enroll" ? "Configurar MFA" : "Verificação MFA"}
             </span>
           </div>
           <button onClick={closeSafely} style={{ background: "none", border: "none", color: C.textDim, cursor: "pointer" }}>
@@ -1006,7 +1135,7 @@ function LoginModal({ onClose, onCancel, onSubmit, onVerify }) {
               </Btn>
             </div>
             <div style={{ marginTop: 10, fontSize: 11, lineHeight: 1.45, color: C.textFaint }}>
-              O acesso administrativo exige senha e autenticação em dois fatores (MFA).
+              O acesso de Administrador e Laboratório exige senha e autenticação em dois fatores (MFA).
             </div>
           </>
         )}
@@ -1124,7 +1253,7 @@ function ReadOnlyNotice({ text, onEnter }) {
     <Card style={{ textAlign: "center", padding: "40px 20px" }}>
       <Eye size={26} color={C.textFaint} style={{ marginBottom: 12 }} />
       <div style={{ color: C.textDim, fontSize: 14, marginBottom: 16 }}>{text}</div>
-      <Btn variant="ghost" onClick={onEnter}><Lock size={13} /> Entrar como admin</Btn>
+      <Btn variant="ghost" onClick={onEnter}><Lock size={13} /> Acesso restrito</Btn>
     </Card>
   );
 }

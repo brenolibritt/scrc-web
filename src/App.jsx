@@ -337,9 +337,13 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isLaboratorio, setIsLaboratorio] = useState(false);
+
   const [showLogin, setShowLogin] = useState(false);
   const [authReady, setAuthReady] = useState(false);
+
   const [adminProfile, setAdminProfile] = useState("");
+  const [laboratorioProfile, setLaboratorioProfile] = useState("");
   const adminInactivityTimerRef = useRef(null);
   const adminLastActivityRef = useRef(Date.now());
   const adminAutoLogoutRunningRef = useRef(false);

@@ -2909,6 +2909,7 @@ function LancarCarga({ cadastros, config, onSave, tipo = "entrada" }) {
     produto: config.aplicarProdutoPadrao ? config.produtoPadrao : "",
     status: tipo === "saida" ? STATUS_SAIDA : (config.statusPadrao || "PENDENTE"),
   }));
+  const [showConfirmacao, setShowConfirmacao] = useState(false);
   const [analisesLaboratorio, setAnalisesLaboratorio] = useState([]);
   const [carregandoLaboratorio, setCarregandoLaboratorio] = useState(true);
 
@@ -2994,8 +2995,22 @@ function LancarCarga({ cadastros, config, onSave, tipo = "entrada" }) {
 
   const submit = () => {
     if (!requiredOk) return;
-    const fornecedorSelecionado = cadastros.fornecedores.find((f) => f.nome === form.fornecedor);
-    onSave({ ...form, status: isSaida ? STATUS_SAIDA : form.status, cnpj: fornecedorSelecionado?.cnpj || "" });
+    setShowConfirmacao(true);
+  };
+
+  const confirmarSubmit = () => {
+    const fornecedorSelecionado = cadastros.fornecedores.find(
+      (f) => f.nome === form.fornecedor
+    );
+
+    onSave({
+      ...form,
+      status: isSaida ? STATUS_SAIDA : form.status,
+      cnpj: fornecedorSelecionado?.cnpj || "",
+    });
+
+    setShowConfirmacao(false);
+
     setForm({
       ...emptyForm,
       produto: config.aplicarProdutoPadrao ? config.produtoPadrao : "",
@@ -3335,6 +3350,332 @@ function LancarCarga({ cadastros, config, onSave, tipo = "entrada" }) {
           <EquationBlock label="Volume líquido (L)" value={fmtL(calc.volumeLiquido)} accent big />
         </div>
       </Card>
+      </div>
+
+      {showConfirmacao && (
+        <ConfirmacaoLancamentoModal
+          form={form}
+          tipo={tipo}
+          cadastros={cadastros}
+          config={config}
+          onClose={() => setShowConfirmacao(false)}
+          onConfirm={confirmarSubmit}
+        />
+      )}
+    </div>
+  );
+}
+
+function ConfirmacaoLancamentoModal({
+  form,
+  tipo,
+  cadastros,
+  config,
+  onClose,
+  onConfirm,
+}) {
+  const isSaida = tipo === "saida";
+  const calc = computeCarga(form, cadastros.veiculos, config);
+
+  const fornecedorSelecionado = cadastros.fornecedores.find(
+    (f) => f.nome === form.fornecedor
+  );
+
+  const cnpj = form.cnpj || fornecedorSelecionado?.cnpj || "—";
+
+  const fmtData = (value) => {
+    if (!value) return "—";
+    const partes = String(value).split("-");
+    return partes.length === 3
+      ? `${partes[2]}/${partes[1]}/${partes[0]}`
+      : value;
+  };
+
+  const linha = (label, value, accent = false) => (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "baseline",
+        gap: 14,
+        padding: "8px 0",
+        borderBottom: `1px solid ${C.border}`,
+      }}
+    >
+      <span style={{ color: C.textDim, fontSize: 12.5 }}>{label}</span>
+      <strong
+        style={{
+          color: accent ? C.accent : C.text,
+          fontFamily: accent ? MONO : "inherit",
+          fontSize: 12.5,
+          textAlign: "right",
+        }}
+      >
+        {value}
+      </strong>
+    </div>
+  );
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 170,
+        background: "rgba(0,0,0,.80)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 18,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: 760,
+          maxWidth: "100%",
+          maxHeight: "88vh",
+          overflowY: "auto",
+          background: C.panel,
+          border: `1px solid ${C.borderLight}`,
+          borderRadius: 8,
+          boxShadow: "0 28px 80px rgba(0,0,0,.50)",
+        }}
+      >
+        <div
+          style={{
+            padding: "18px 20px",
+            borderBottom: `1px solid ${C.border}`,
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 14,
+          }}
+        >
+          <div>
+            <div
+              style={{
+                color: C.accent,
+                fontFamily: MONO,
+                fontSize: 10.5,
+                letterSpacing: ".08em",
+                textTransform: "uppercase",
+                marginBottom: 5,
+              }}
+            >
+              Conferência antes de salvar
+            </div>
+
+            <div
+              style={{
+                color: C.text,
+                fontFamily: DISPLAY,
+                fontSize: 22,
+                fontWeight: 800,
+                textTransform: "uppercase",
+              }}
+            >
+              Confirmar lançamento de {isSaida ? "saída" : "entrada"}
+            </div>
+
+            <div
+              style={{
+                color: C.textDim,
+                fontSize: 12.5,
+                marginTop: 5,
+              }}
+            >
+              Revise as principais informações da carga antes de registrá-la.
+            </div>
+          </div>
+
+          <button
+            onClick={onClose}
+            title="Fechar e voltar ao formulário"
+            style={{
+              background: "none",
+              border: "none",
+              color: C.textDim,
+              cursor: "pointer",
+              padding: 4,
+            }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div style={{ padding: 20, display: "grid", gap: 16 }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(2,minmax(0,1fr))",
+              gap: 12,
+            }}
+            className="scrc-grid"
+          >
+            <Card style={{ padding: 14 }}>
+              <div
+                style={{
+                  color: C.textFaint,
+                  fontSize: 10.5,
+                  letterSpacing: ".07em",
+                  textTransform: "uppercase",
+                  marginBottom: 7,
+                }}
+              >
+                Identificação
+              </div>
+
+              {linha("Data", fmtData(form.data))}
+              {linha("Placa", form.placa || "—")}
+              {linha("Motorista", form.motorista || "—")}
+              {linha("Fornecedor", form.fornecedor || "—")}
+              {linha("CNPJ", cnpj)}
+              {linha("Nota Fiscal", form.notaFiscal || "—")}
+              {linha("Produto", form.produto || "—")}
+              {linha(isSaida ? "Tanque origem" : "Tanque destino", form.tanque || "—")}
+            </Card>
+
+            <Card style={{ padding: 14 }}>
+              <div
+                style={{
+                  color: C.textFaint,
+                  fontSize: 10.5,
+                  letterSpacing: ".07em",
+                  textTransform: "uppercase",
+                  marginBottom: 7,
+                }}
+              >
+                Operação
+              </div>
+
+              {linha("Chegada", form.chegada || "—")}
+              {linha("Saída", form.saida || "—")}
+              {linha("Ofertado NF", `${fmtBR(num(form.ofertado))} L`)}
+              {linha("Peso bruto", `${fmtBR(num(form.pesoBruto))} kg`)}
+              {linha("Drenagem de água", `${fmtBR(num(form.drenagem))} L`)}
+              {linha("Tara", `${fmtBR(num(form.tara))} kg`)}
+              {linha("Peso líquido", `${fmtBR(calc.pesoLiquido)} kg`, true)}
+              {linha("Volume líquido", `${fmtBR(calc.volumeLiquido)} L`, true)}
+            </Card>
+          </div>
+
+          <Card style={{ padding: 14 }}>
+            <div
+              style={{
+                color: C.textFaint,
+                fontSize: 10.5,
+                letterSpacing: ".07em",
+                textTransform: "uppercase",
+                marginBottom: 10,
+              }}
+            >
+              Qualidade e medição
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(4,minmax(0,1fr))",
+                gap: 10,
+              }}
+              className="scrc-grid"
+            >
+              {[
+                ["API", form.api || "—"],
+                ["Densidade 20º", form.densidade || "—"],
+                ["BS&W", `${form.bsw || 0}%`],
+                ["Divergência", `${fmtBR(calc.divergencia)} ${calc.unidadeDivergencia}`],
+              ].map(([label, value]) => (
+                <div
+                  key={label}
+                  style={{
+                    background: C.panelAlt,
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 5,
+                    padding: "11px 12px",
+                  }}
+                >
+                  <div
+                    style={{
+                      color: C.textFaint,
+                      fontSize: 9.5,
+                      textTransform: "uppercase",
+                      letterSpacing: ".06em",
+                      marginBottom: 4,
+                    }}
+                  >
+                    {label}
+                  </div>
+                  <div
+                    style={{
+                      color:
+                        label === "Divergência" && calc.divergenciaAlta
+                          ? C.red
+                          : C.text,
+                      fontFamily: MONO,
+                      fontSize: 15,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {value}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {calc.divergenciaAlta && (
+              <div
+                style={{
+                  marginTop: 12,
+                  background: C.redBg,
+                  border: `1px solid ${C.red}55`,
+                  color: C.red,
+                  borderRadius: 5,
+                  padding: "9px 11px",
+                  fontSize: 12,
+                }}
+              >
+                Atenção: a divergência está acima do limite configurado no SCRC.
+              </div>
+            )}
+          </Card>
+
+          <div
+            style={{
+              background: "#1B2530",
+              border: `1px solid ${C.steel}44`,
+              borderRadius: 5,
+              padding: "11px 13px",
+              color: C.textDim,
+              fontSize: 12.5,
+              lineHeight: 1.55,
+            }}
+          >
+            <strong style={{ color: C.steel }}>Confira antes de confirmar:</strong>{" "}
+            placa, nota fiscal, produto, volume ofertado, peso bruto, tara, API e
+            densidade. Se encontrar qualquer erro, volte ao formulário e corrija.
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: "14px 20px",
+            borderTop: `1px solid ${C.border}`,
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          <Btn variant="ghost" onClick={onClose}>
+            <ArrowLeft size={14} /> Voltar e corrigir
+          </Btn>
+
+          <Btn onClick={onConfirm}>
+            <Check size={14} /> Confirmar lançamento
+          </Btn>
+        </div>
       </div>
     </div>
   );

@@ -3,7 +3,7 @@ import {
   Plus, Trash2, Pencil, Check, X, Fuel, Truck, Users, Building2,
   Gauge, ClipboardList, LayoutDashboard, AlertTriangle, Save,
   ChevronDown, Search, Droplets, Warehouse, Lock, Unlock, Eye, Settings,
-  FileText, Download
+  FileText, Download, HelpCircle, BookOpen, ArrowLeft, ArrowRight
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, LabelList,
@@ -543,6 +543,7 @@ const STATUS_SAIDA = "ENVIADO";
 
 const ADMIN_INACTIVITY_MS = 15 * 60 * 1000; // 15 minutos
 const ADMIN_LAST_ACTIVITY_KEY = "scrc_admin_last_activity";
+const SCRC_GUIDE_VERSION = "v1";
 
 
 const STATUS_STYLE = {
@@ -755,6 +756,7 @@ export default function App() {
   const [isLaboratorio, setIsLaboratorio] = useState(false);
 
   const [showLogin, setShowLogin] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
   const [authReady, setAuthReady] = useState(false);
 
   const [adminProfile, setAdminProfile] = useState("");
@@ -1173,6 +1175,34 @@ export default function App() {
     [cadastros.veiculos]
   );
 
+  const guideMode = isLaboratorio
+    ? "laboratorio"
+    : isAdmin
+      ? "admin"
+      : "visitante";
+
+  const guideStorageKey = `scrc_guia_${SCRC_GUIDE_VERSION}_${guideMode}`;
+
+  useEffect(() => {
+    if (!authReady || loading) return;
+
+    try {
+      const jaVisualizado = localStorage.getItem(guideStorageKey) === "1";
+      if (!jaVisualizado) {
+        setShowGuide(true);
+      }
+    } catch (_) {
+      // Se o navegador bloquear o localStorage, o botão manual continua disponível.
+    }
+  }, [authReady, loading, guideStorageKey]);
+
+  const fecharGuia = useCallback(() => {
+    try {
+      localStorage.setItem(guideStorageKey, "1");
+    } catch (_) {}
+    setShowGuide(false);
+  }, [guideStorageKey]);
+
   const TABS = isLaboratorio
     ? []
     : [
@@ -1251,6 +1281,19 @@ export default function App() {
             })}
           </nav>
 
+          <button
+            onClick={() => setShowGuide(true)}
+            title="Abrir o guia rápido do SCRC"
+            style={{
+              display: "flex", alignItems: "center", gap: 6, background: "transparent",
+              border: `1px solid ${C.border}`, borderRadius: 4, color: C.textDim,
+              padding: "8px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer",
+              textTransform: "uppercase", letterSpacing: "0.03em",
+            }}
+          >
+            <HelpCircle size={13} color={C.accent} /> Como usar
+          </button>
+
           {isAdmin ? (
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <Pill text="Modo admin" fg={C.accent} bg={`${C.accentDim}33`} />
@@ -1327,6 +1370,14 @@ export default function App() {
           )}
         </div>
       </div>
+
+      {showGuide && (
+        <GuiaUsoModal
+          mode={guideMode}
+          currentTab={tab}
+          onClose={fecharGuia}
+        />
+      )}
 
       {showLogin && (
         <LoginModal
@@ -2171,6 +2222,429 @@ const labTd = {
   color: C.text,
   verticalAlign: "middle",
 };
+
+
+function GuiaUsoModal({ mode, currentTab, onClose }) {
+  const [stepIndex, setStepIndex] = useState(0);
+
+  const steps = useMemo(() => {
+    if (mode === "laboratorio") {
+      return [
+        {
+          title: "Bem-vindo ao Laboratório",
+          icon: BookOpen,
+          text:
+            "O acesso do Laboratório é exclusivo para registrar e consultar os resultados de Temperatura, Densidade e API. As demais áreas administrativas permanecem bloqueadas.",
+          tip:
+            "Use sempre os dados que identificam corretamente a carga antes de registrar a análise.",
+        },
+        {
+          title: "1. Identifique a carga",
+          icon: Truck,
+          text:
+            "Informe o tipo de movimento, a data de referência, a placa/conjunto, a nota fiscal quando disponível e o produto. Esses dados ajudam o Administrador a localizar a análise correta.",
+          tip:
+            "Placa, data, produto e nota fiscal tornam a correspondência mais segura.",
+        },
+        {
+          title: "2. Informe os resultados",
+          icon: Gauge,
+          text:
+            "Preencha Temperatura, Densidade e API com os valores obtidos pelo Laboratório. Confira os três campos antes de registrar.",
+          tip:
+            "Esses valores servem como referência para o lançamento da carga e não alteram os lançamentos automaticamente.",
+        },
+        {
+          title: "3. Registre e consulte",
+          icon: Save,
+          text:
+            "Clique em Registrar análise. Depois, use a relação de análises registradas para confirmar que o envio foi salvo corretamente.",
+          tip:
+            "Se houver dúvida sobre a identificação da carga, confirme antes de criar um novo registro.",
+        },
+        {
+          title: "4. Finalize o acesso",
+          icon: Unlock,
+          text:
+            "Ao terminar o trabalho, clique em Sair. O SCRC também encerra automaticamente sessões restritas após o período configurado de inatividade.",
+          tip:
+            "Não compartilhe sua sessão autenticada com outras pessoas.",
+        },
+      ];
+    }
+
+    if (mode === "admin") {
+      return [
+        {
+          title: "Bem-vindo ao SCRC",
+          icon: BookOpen,
+          text:
+            "Este guia apresenta o fluxo básico de trabalho do Sistema de Controle de Recebimento de Cargas. Você pode voltar a este passo a passo a qualquer momento pelo botão Como usar.",
+          tip:
+            "A ordem mais comum é: cadastrar referências → lançar carga → consultar histórico e painel.",
+        },
+        {
+          title: "1. Lançar Entrada",
+          icon: Plus,
+          text:
+            "Use Lançar Entrada quando uma carga chegar à unidade. Preencha a identificação, os dados operacionais, qualidade/medição e os valores necessários. Confira a Prévia antes de registrar.",
+          tip:
+            "A área Referência do Laboratório é somente para consulta. API e Densidade continuam sendo digitadas manualmente.",
+        },
+        {
+          title: "2. Lançar Saída",
+          icon: Truck,
+          text:
+            "Use Lançar Saída para registrar cargas expedidas. O preenchimento é semelhante ao de Entrada, com as regras específicas da saída já aplicadas pelo SCRC.",
+          tip:
+            "O status de saída é controlado pelo próprio fluxo do sistema.",
+        },
+        {
+          title: "3. Histórico",
+          icon: ClipboardList,
+          text:
+            "No Histórico você consulta as cargas de Entrada e Saída, pesquisa por informações importantes, filtra por mês e, quando autorizado, edita registros.",
+          tip:
+            "O botão Gerar Relatório permite exportar Entrada, Saída ou um relatório consolidado em formato TXT.",
+        },
+        {
+          title: "4. Painel Resumo",
+          icon: LayoutDashboard,
+          text:
+            "Use o Painel Resumo para acompanhar os principais totais, divergências, valores e comparativos das movimentações registradas.",
+          tip:
+            "Alterne entre Entradas, Saídas e Consolidado para comparar os resultados.",
+        },
+        {
+          title: "5. Cadastros",
+          icon: Warehouse,
+          text:
+            "Cadastre e mantenha fornecedores, motoristas, veículos, produtos e tanques. Esses registros alimentam as opções disponíveis nos lançamentos.",
+          tip:
+            "Prefira atualizar um cadastro existente em vez de criar duplicidades.",
+        },
+        {
+          title: "6. Laboratório",
+          icon: Gauge,
+          text:
+            "A aba Laboratório permite ao Administrador consultar Temperatura, Densidade e API informados pelo setor responsável e marcar uma análise como conferida.",
+          tip:
+            "Os resultados laboratoriais não são transferidos automaticamente para uma carga.",
+        },
+        {
+          title: "7. Configurações",
+          icon: Settings,
+          text:
+            "Em Configurações ficam parâmetros gerais do SCRC, como produto padrão, unidade e limite de divergência. Altere somente quando houver necessidade operacional.",
+          tip:
+            "Mudanças de configuração podem influenciar cálculos e alertas futuros.",
+        },
+        {
+          title: "8. Segurança e saída",
+          icon: Lock,
+          text:
+            "O Modo Admin exige autenticação e MFA. Ao terminar uma operação administrativa, use Sair. O sistema também encerra o acesso restrito após inatividade.",
+          tip:
+            "O modo Visitante continua disponível para consultas permitidas.",
+        },
+      ];
+    }
+
+    return [
+      {
+        title: "Bem-vindo ao SCRC",
+        icon: BookOpen,
+        text:
+          "No modo Visitante você pode consultar as informações liberadas do sistema sem alterar os dados. Use este guia para conhecer as principais áreas.",
+        tip:
+          "Para lançar ou alterar informações é necessário entrar pelo Acesso restrito com uma conta autorizada.",
+      },
+      {
+        title: "1. Histórico",
+        icon: ClipboardList,
+        text:
+          "Consulte cargas de Entrada e Saída, utilize a busca e filtre por mês para encontrar rapidamente uma movimentação.",
+        tip:
+          "O Histórico é a área principal para conferência dos registros existentes.",
+      },
+      {
+        title: "2. Painel Resumo",
+        icon: LayoutDashboard,
+        text:
+          "Veja totais e comparativos das cargas registradas. É possível alternar entre Entradas, Saídas e visão Consolidada.",
+        tip:
+          "Use o painel para uma visão rápida; para detalhes, volte ao Histórico.",
+      },
+      {
+        title: "3. Cadastros",
+        icon: Warehouse,
+        text:
+          "Consulte as referências cadastradas, como fornecedores, motoristas, veículos, produtos e tanques.",
+        tip:
+          "No modo Visitante essas informações são apenas para consulta.",
+      },
+      {
+        title: "4. Acesso restrito",
+        icon: Lock,
+        text:
+          "Administradores e usuários do Laboratório entram pelo botão Acesso restrito. O sistema exige as permissões corretas e autenticação MFA.",
+        tip:
+          "Cada perfil vê somente as funções liberadas para sua atividade.",
+      },
+    ];
+  }, [mode]);
+
+  useEffect(() => {
+    setStepIndex(0);
+  }, [mode]);
+
+  const step = steps[stepIndex];
+  const Icon = step.icon || BookOpen;
+  const first = stepIndex === 0;
+  const last = stepIndex === steps.length - 1;
+
+  const modeLabel =
+    mode === "admin"
+      ? "Guia do Administrador"
+      : mode === "laboratorio"
+        ? "Guia do Laboratório"
+        : "Guia do Visitante";
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 160,
+        background: "rgba(0,0,0,.78)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 18,
+      }}
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: 680,
+          maxWidth: "100%",
+          background: C.panel,
+          border: `1px solid ${C.borderLight}`,
+          borderRadius: 8,
+          boxShadow: "0 28px 80px rgba(0,0,0,.5)",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            padding: "18px 20px",
+            borderBottom: `1px solid ${C.border}`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 14,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: 6,
+                background: `${C.accentDim}44`,
+                border: `1px solid ${C.accent}44`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <HelpCircle size={18} color={C.accent} />
+            </div>
+            <div>
+              <div
+                style={{
+                  fontFamily: MONO,
+                  fontSize: 10.5,
+                  letterSpacing: ".09em",
+                  textTransform: "uppercase",
+                  color: C.accent,
+                }}
+              >
+                Como usar o SCRC
+              </div>
+              <div
+                style={{
+                  color: C.text,
+                  fontFamily: DISPLAY,
+                  fontWeight: 800,
+                  fontSize: 18,
+                }}
+              >
+                {modeLabel}
+              </div>
+            </div>
+          </div>
+
+          <button
+            onClick={onClose}
+            title="Fechar guia"
+            style={{
+              background: "none",
+              border: "none",
+              color: C.textDim,
+              cursor: "pointer",
+              padding: 4,
+            }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div style={{ padding: "22px 22px 18px" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: 6,
+              marginBottom: 20,
+            }}
+          >
+            {steps.map((_, index) => (
+              <div
+                key={index}
+                style={{
+                  flex: 1,
+                  height: 4,
+                  borderRadius: 3,
+                  background: index <= stepIndex ? C.accent : C.border,
+                }}
+              />
+            ))}
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "58px 1fr",
+              gap: 16,
+              alignItems: "start",
+            }}
+          >
+            <div
+              style={{
+                width: 54,
+                height: 54,
+                borderRadius: 8,
+                background: C.panelAlt,
+                border: `1px solid ${C.border}`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Icon size={25} color={C.accent} />
+            </div>
+
+            <div>
+              <div
+                style={{
+                  color: C.textFaint,
+                  fontFamily: MONO,
+                  fontSize: 10.5,
+                  letterSpacing: ".08em",
+                  textTransform: "uppercase",
+                  marginBottom: 5,
+                }}
+              >
+                Passo {stepIndex + 1} de {steps.length}
+              </div>
+
+              <h2
+                style={{
+                  margin: 0,
+                  color: C.text,
+                  fontFamily: DISPLAY,
+                  textTransform: "uppercase",
+                  fontSize: 24,
+                  lineHeight: 1.1,
+                }}
+              >
+                {step.title}
+              </h2>
+
+              <p
+                style={{
+                  color: C.textDim,
+                  fontSize: 14,
+                  lineHeight: 1.65,
+                  margin: "13px 0 0",
+                }}
+              >
+                {step.text}
+              </p>
+
+              <div
+                style={{
+                  marginTop: 16,
+                  padding: "11px 13px",
+                  borderRadius: 5,
+                  background: "#1B2530",
+                  border: `1px solid ${C.steel}44`,
+                  color: C.textDim,
+                  fontSize: 12.5,
+                  lineHeight: 1.5,
+                }}
+              >
+                <strong style={{ color: C.steel }}>Dica:</strong> {step.tip}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: "14px 20px",
+            borderTop: `1px solid ${C.border}`,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ color: C.textFaint, fontSize: 11.5 }}>
+            Este guia aparece automaticamente apenas na primeira utilização deste perfil neste navegador.
+          </div>
+
+          <div style={{ display: "flex", gap: 8 }}>
+            {!first && (
+              <Btn
+                variant="ghost"
+                onClick={() => setStepIndex((i) => Math.max(0, i - 1))}
+              >
+                <ArrowLeft size={14} /> Anterior
+              </Btn>
+            )}
+
+            {!last ? (
+              <Btn
+                onClick={() =>
+                  setStepIndex((i) => Math.min(steps.length - 1, i + 1))
+                }
+              >
+                Próximo <ArrowRight size={14} />
+              </Btn>
+            ) : (
+              <Btn onClick={onClose}>
+                <Check size={14} /> Concluir
+              </Btn>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function LoginModal({ onClose, onCancel, onSubmit, onVerify }) {
   const [email, setEmail] = useState("");

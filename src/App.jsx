@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   Plus, Trash2, Pencil, Check, X, Fuel, Truck, Users, Building2,
   Gauge, ClipboardList, LayoutDashboard, AlertTriangle, Save,
-  ChevronDown, Search, Droplets, Warehouse, Lock, Unlock, Eye, Settings
+  ChevronDown, Search, Droplets, Warehouse, Lock, Unlock, Eye, Settings,
+  FileText, Download
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, LabelList,
@@ -125,6 +126,345 @@ function computeCarga(row, veiculos, config) {
     valorProduto, valorFrete, custoMercadoria, icms, pis, cofins, cide, totalTributos,
     valorTotal, tempoMin: tp, transportadora, placaCadastrada, unidadeDivergencia: unidade,
   };
+}
+
+
+function normalizarDataRelatorio(value) {
+  if (!value) return "—";
+  const p = String(value).split("-");
+  return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : String(value);
+}
+
+function formatarNumeroRelatorio(value, casas = 2) {
+  return num(value).toLocaleString("pt-BR", {
+    minimumFractionDigits: casas,
+    maximumFractionDigits: casas,
+  });
+}
+
+function formatarMoedaRelatorio(value) {
+  return num(value).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
+}
+
+function filtrarCargasRelatorio(cargas, periodo) {
+  return (cargas || []).filter((c) => {
+    const data = String(c.data || "");
+
+    if (periodo.modo === "mes") {
+      return periodo.mes ? data.startsWith(periodo.mes) : true;
+    }
+
+    if (periodo.modo === "intervalo") {
+      if (periodo.inicio && data < periodo.inicio) return false;
+      if (periodo.fim && data > periodo.fim) return false;
+    }
+
+    return true;
+  });
+}
+
+function montarResumoRelatorio(registros, veiculos, config) {
+  const resumo = {
+    quantidade: registros.length,
+    volumeOfertado: 0,
+    pesoBruto: 0,
+    pesoLiquido: 0,
+    volumeLiquido: 0,
+    valorFrete: 0,
+    tributos: 0,
+    valorTotal: 0,
+    alertasDivergencia: 0,
+    fornecedores: new Set(),
+    motoristas: new Set(),
+    veiculos: new Set(),
+    produtos: new Map(),
+  };
+
+  registros.forEach((row) => {
+    const calc = computeCarga(row, veiculos, config);
+
+    resumo.volumeOfertado += num(row.ofertado);
+    resumo.pesoBruto += num(row.pesoBruto);
+    resumo.pesoLiquido += calc.pesoLiquido;
+    resumo.volumeLiquido += calc.volumeLiquido;
+    resumo.valorFrete += calc.valorFrete;
+    resumo.tributos += calc.totalTributos;
+    resumo.valorTotal += calc.valorTotal;
+    if (calc.divergenciaAlta) resumo.alertasDivergencia += 1;
+
+    if (row.fornecedor) resumo.fornecedores.add(row.fornecedor);
+    if (row.motorista) resumo.motoristas.add(row.motorista);
+    if (row.placa) resumo.veiculos.add(row.placa);
+
+    const produto = row.produto || "Não informado";
+    resumo.produtos.set(produto, (resumo.produtos.get(produto) || 0) + 1);
+  });
+
+  return resumo;
+}
+
+function montarSecaoCargasRelatorio(titulo, registros, cadastros, config) {
+  const linha = "=".repeat(76);
+  const sublinha = "-".repeat(76);
+
+  if (!registros.length) {
+    return [
+      linha,
+      titulo,
+      linha,
+      "",
+      "Nenhum registro encontrado para o período selecionado.",
+      "",
+    ].join("\n");
+  }
+
+  const blocos = registros.map((row, index) => {
+    const calc = computeCarga(row, cadastros.veiculos, config);
+    const fornecedorCadastro = cadastros.fornecedores.find(
+      (f) => f.nome === row.fornecedor
+    );
+    const cnpj = row.cnpj || fornecedorCadastro?.cnpj || "—";
+
+    return [
+      `REGISTRO ${String(index + 1).padStart(3, "0")}`,
+      sublinha,
+      `Data: ${normalizarDataRelatorio(row.data)}`,
+      `Tipo: ${titulo.includes("SAÍDA") ? "Saída" : "Entrada"}`,
+      `Placa: ${row.placa || "—"}`,
+      `Motorista: ${row.motorista || "—"}`,
+      `Fornecedor: ${row.fornecedor || "—"}`,
+      `CNPJ: ${cnpj}`,
+      `Nota Fiscal: ${row.notaFiscal || "—"}`,
+      `Produto: ${row.produto || "—"}`,
+      `Tanque: ${row.tanque || "—"}`,
+      `Status: ${row.status || "—"}`,
+      "",
+      "DADOS OPERACIONAIS",
+      `Chegada: ${row.chegada || "—"}`,
+      `Saída: ${row.saida || "—"}`,
+      `Tempo de pátio: ${fmtMins(calc.tempoMin)}`,
+      `Volume ofertado: ${formatarNumeroRelatorio(row.ofertado)} L`,
+      `Peso bruto: ${formatarNumeroRelatorio(row.pesoBruto)} kg`,
+      `Drenagem de água: ${formatarNumeroRelatorio(row.drenagem)} L`,
+      `Tara: ${formatarNumeroRelatorio(row.tara)} kg`,
+      `Peso líquido calculado: ${formatarNumeroRelatorio(calc.pesoLiquido)} kg`,
+      "",
+      "DADOS DE QUALIDADE / MEDIÇÃO",
+      `API: ${row.api || "—"}`,
+      `Densidade a 20 °C: ${row.densidade || "—"}`,
+      `BS&W: ${row.bsw || "0"}%`,
+      `Volume com BS&W: ${formatarNumeroRelatorio(calc.volumeComBSW)} L`,
+      `BS&W calculado: ${formatarNumeroRelatorio(calc.bswL)} L`,
+      `Volume líquido: ${formatarNumeroRelatorio(calc.volumeLiquido)} L`,
+      `Divergência: ${formatarNumeroRelatorio(calc.divergencia)} ${calc.unidadeDivergencia}${calc.divergenciaAlta ? "  [ALERTA]" : ""}`,
+      "",
+      "DADOS FINANCEIROS",
+      `Custo unitário: ${row.custoUnit ? formatarMoedaRelatorio(row.custoUnit) + "/L" : "—"}`,
+      `Frete unitário: ${row.frete ? formatarMoedaRelatorio(row.frete) + "/L" : "—"}`,
+      `Valor do frete: ${formatarMoedaRelatorio(calc.valorFrete)}`,
+      `Tributos calculados: ${formatarMoedaRelatorio(calc.totalTributos)}`,
+      `Valor total calculado: ${formatarMoedaRelatorio(calc.valorTotal)}`,
+      row.observacoes ? `Observações: ${row.observacoes}` : null,
+      "",
+    ].filter(Boolean).join("\n");
+  });
+
+  return [
+    linha,
+    titulo,
+    linha,
+    "",
+    ...blocos,
+  ].join("\n");
+}
+
+function montarResumoDescritivoRelatorio(entradas, saidas, cadastros, config) {
+  const todos = [...entradas, ...saidas];
+  const rEntrada = montarResumoRelatorio(entradas, cadastros.veiculos, config);
+  const rSaida = montarResumoRelatorio(saidas, cadastros.veiculos, config);
+  const rGeral = montarResumoRelatorio(todos, cadastros.veiculos, config);
+
+  const produtos = Array.from(rGeral.produtos.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([produto, qtd]) => `- ${produto}: ${qtd} carga${qtd === 1 ? "" : "s"}`)
+    .join("\n") || "- Nenhum produto registrado";
+
+  const partes = [];
+
+  if (entradas.length && saidas.length) {
+    partes.push(
+      `No período analisado foram registradas ${rGeral.quantidade} movimentações no SCRC, sendo ${rEntrada.quantidade} entrada${rEntrada.quantidade === 1 ? "" : "s"} e ${rSaida.quantidade} saída${rSaida.quantidade === 1 ? "" : "s"}.`
+    );
+  } else if (entradas.length) {
+    partes.push(
+      `No período analisado foram registradas ${rEntrada.quantidade} carga${rEntrada.quantidade === 1 ? "" : "s"} de entrada no SCRC.`
+    );
+  } else if (saidas.length) {
+    partes.push(
+      `No período analisado foram registradas ${rSaida.quantidade} carga${rSaida.quantidade === 1 ? "" : "s"} de saída no SCRC.`
+    );
+  } else {
+    partes.push("Não foram encontradas movimentações para o período selecionado.");
+  }
+
+  if (todos.length) {
+    partes.push(
+      `O volume líquido consolidado foi de ${formatarNumeroRelatorio(rGeral.volumeLiquido)} L, com peso líquido calculado de ${formatarNumeroRelatorio(rGeral.pesoLiquido)} kg.`
+    );
+
+    partes.push(
+      `Foram identificados ${rGeral.fornecedores.size} fornecedor${rGeral.fornecedores.size === 1 ? "" : "es"}, ${rGeral.motoristas.size} motorista${rGeral.motoristas.size === 1 ? "" : "s"} e ${rGeral.veiculos.size} veículo/conjunto${rGeral.veiculos.size === 1 ? "" : "s"} distintos.`
+    );
+
+    if (rGeral.alertasDivergencia > 0) {
+      partes.push(
+        `Existem ${rGeral.alertasDivergencia} registro${rGeral.alertasDivergencia === 1 ? "" : "s"} com divergência acima do limite configurado e que merecem conferência.`
+      );
+    } else {
+      partes.push(
+        "Nenhum registro do período apresentou alerta de divergência acima do limite configurado."
+      );
+    }
+  }
+
+  return {
+    rEntrada,
+    rSaida,
+    rGeral,
+    produtos,
+    texto: partes.join("\n\n"),
+  };
+}
+
+function gerarConteudoRelatorioTxt({
+  cargasEntrada,
+  cargasSaida,
+  cadastros,
+  config,
+  tipo,
+  periodo,
+}) {
+  const entradas =
+    tipo === "saida" ? [] : filtrarCargasRelatorio(cargasEntrada, periodo);
+  const saidas =
+    tipo === "entrada" ? [] : filtrarCargasRelatorio(cargasSaida, periodo);
+
+  const resumo = montarResumoDescritivoRelatorio(
+    entradas,
+    saidas,
+    cadastros,
+    config
+  );
+
+  const agora = new Date();
+  const dataGeracao = agora.toLocaleDateString("pt-BR");
+  const horaGeracao = agora.toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  let periodoTexto = "Todos os registros";
+  if (periodo.modo === "mes" && periodo.mes) {
+    const [ano, mes] = periodo.mes.split("-");
+    periodoTexto = `${mes}/${ano}`;
+  } else if (periodo.modo === "intervalo") {
+    periodoTexto = `${normalizarDataRelatorio(periodo.inicio) || "Início"} até ${normalizarDataRelatorio(periodo.fim) || "Fim"}`;
+  }
+
+  const linha = "=".repeat(76);
+  const secoes = [];
+
+  if (tipo !== "saida") {
+    secoes.push(
+      montarSecaoCargasRelatorio(
+        "CARGAS DE ENTRADA",
+        entradas,
+        cadastros,
+        config
+      )
+    );
+  }
+
+  if (tipo !== "entrada") {
+    secoes.push(
+      montarSecaoCargasRelatorio(
+        "CARGAS DE SAÍDA",
+        saidas,
+        cadastros,
+        config
+      )
+    );
+  }
+
+  return [
+    linha,
+    "SCRC - SISTEMA DE CONTROLE DE RECEBIMENTO DE CARGAS",
+    "RELATÓRIO DE MOVIMENTAÇÃO",
+    linha,
+    "",
+    `Gerado em: ${dataGeracao} às ${horaGeracao}`,
+    `Período analisado: ${periodoTexto}`,
+    `Movimentações: ${
+      tipo === "ambos" ? "Entradas e Saídas" : tipo === "entrada" ? "Entradas" : "Saídas"
+    }`,
+    "",
+    ...secoes,
+    linha,
+    "RESUMO GERAL",
+    linha,
+    "",
+    `Total de cargas de entrada: ${resumo.rEntrada.quantidade}`,
+    `Total de cargas de saída: ${resumo.rSaida.quantidade}`,
+    `Total de movimentações: ${resumo.rGeral.quantidade}`,
+    "",
+    `Volume ofertado consolidado: ${formatarNumeroRelatorio(resumo.rGeral.volumeOfertado)} L`,
+    `Volume líquido consolidado: ${formatarNumeroRelatorio(resumo.rGeral.volumeLiquido)} L`,
+    `Peso bruto consolidado: ${formatarNumeroRelatorio(resumo.rGeral.pesoBruto)} kg`,
+    `Peso líquido calculado: ${formatarNumeroRelatorio(resumo.rGeral.pesoLiquido)} kg`,
+    `Valor de frete calculado: ${formatarMoedaRelatorio(resumo.rGeral.valorFrete)}`,
+    `Tributos calculados: ${formatarMoedaRelatorio(resumo.rGeral.tributos)}`,
+    `Valor total calculado: ${formatarMoedaRelatorio(resumo.rGeral.valorTotal)}`,
+    `Alertas de divergência: ${resumo.rGeral.alertasDivergencia}`,
+    "",
+    "PRODUTOS MOVIMENTADOS",
+    resumo.produtos,
+    "",
+    linha,
+    "RESUMO DESCRITIVO",
+    linha,
+    "",
+    resumo.texto,
+    "",
+    linha,
+    "FIM DO RELATÓRIO",
+    linha,
+    "",
+  ].join("\n");
+}
+
+function baixarRelatorioTxt(conteudo, tipo) {
+  const agora = new Date();
+  const dataArquivo = [
+    agora.getFullYear(),
+    String(agora.getMonth() + 1).padStart(2, "0"),
+    String(agora.getDate()).padStart(2, "0"),
+  ].join("-");
+
+  const nome = `RELATORIO_SCRC_${tipo.toUpperCase()}_${dataArquivo}.txt`;
+  const blob = new Blob(["\uFEFF", conteudo], {
+    type: "text/plain;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nome;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -2500,6 +2840,7 @@ function Historico({
   const [monthFilter, setMonthFilter] = useState("todos");
   const [query, setQuery] = useState("");
   const [editingRow, setEditingRow] = useState(null);
+  const [showReport, setShowReport] = useState(false);
 
   const cargas = tipoHistorico === "entrada" ? cargasEntrada : cargasSaida;
   const onDelete = tipoHistorico === "entrada" ? onDeleteEntrada : onDeleteSaida;
@@ -2592,6 +2933,10 @@ function Historico({
             {months.map((m) => <option key={m} value={m}>{monthLabel(m + "-01")}</option>)}
           </Select>
         </div>
+
+        <Btn onClick={() => setShowReport(true)}>
+          <FileText size={14} /> Gerar relatório
+        </Btn>
       </div>
 
       {filtered.length === 0 ? (
@@ -2682,6 +3027,18 @@ function Historico({
         </div>
       )}
 
+      {showReport && (
+        <RelatorioTxtModal
+          cargasEntrada={cargasEntrada}
+          cargasSaida={cargasSaida}
+          cadastros={cadastros}
+          config={config}
+          tipoInicial={tipoHistorico}
+          mesInicial={monthFilter !== "todos" ? monthFilter : ""}
+          onClose={() => setShowReport(false)}
+        />
+      )}
+
       {editingRow && (
         <EditCargaModal
           row={editingRow}
@@ -2695,6 +3052,236 @@ function Historico({
   );
 }
 const td = { padding: "9px 12px", whiteSpace: "nowrap" };
+
+
+function RelatorioTxtModal({
+  cargasEntrada,
+  cargasSaida,
+  cadastros,
+  config,
+  tipoInicial,
+  mesInicial,
+  onClose,
+}) {
+  const [tipo, setTipo] = useState(tipoInicial || "ambos");
+  const [modoPeriodo, setModoPeriodo] = useState(mesInicial ? "mes" : "todos");
+  const [mes, setMes] = useState(mesInicial || "");
+  const [inicio, setInicio] = useState("");
+  const [fim, setFim] = useState("");
+
+  const periodo = useMemo(
+    () => ({
+      modo: modoPeriodo,
+      mes,
+      inicio,
+      fim,
+    }),
+    [modoPeriodo, mes, inicio, fim]
+  );
+
+  const quantidade = useMemo(() => {
+    const entrada =
+      tipo === "saida"
+        ? 0
+        : filtrarCargasRelatorio(cargasEntrada, periodo).length;
+    const saida =
+      tipo === "entrada"
+        ? 0
+        : filtrarCargasRelatorio(cargasSaida, periodo).length;
+
+    return entrada + saida;
+  }, [cargasEntrada, cargasSaida, tipo, periodo]);
+
+  const gerar = () => {
+    const conteudo = gerarConteudoRelatorioTxt({
+      cargasEntrada,
+      cargasSaida,
+      cadastros,
+      config,
+      tipo,
+      periodo,
+    });
+
+    baixarRelatorioTxt(conteudo, tipo);
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 130,
+        background: "rgba(0,0,0,.72)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 18,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: 560,
+          maxWidth: "100%",
+          background: C.panel,
+          border: `1px solid ${C.borderLight}`,
+          borderRadius: 8,
+          padding: 22,
+          boxShadow: "0 24px 70px rgba(0,0,0,.45)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 14,
+            marginBottom: 18,
+          }}
+        >
+          <div>
+            <div
+              style={{
+                color: C.accent,
+                fontFamily: MONO,
+                fontSize: 10.5,
+                textTransform: "uppercase",
+                letterSpacing: ".09em",
+                marginBottom: 5,
+              }}
+            >
+              Exportação TXT
+            </div>
+            <div
+              style={{
+                color: C.text,
+                fontFamily: DISPLAY,
+                fontSize: 21,
+                fontWeight: 800,
+                textTransform: "uppercase",
+              }}
+            >
+              Gerar relatório SCRC
+            </div>
+          </div>
+
+          <button
+            onClick={onClose}
+            style={{
+              background: "none",
+              border: "none",
+              color: C.textDim,
+              cursor: "pointer",
+              padding: 3,
+            }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div
+          style={{
+            padding: "11px 13px",
+            borderRadius: 5,
+            background: "#1B2530",
+            border: `1px solid ${C.steel}44`,
+            color: C.textDim,
+            fontSize: 12,
+            lineHeight: 1.5,
+            marginBottom: 18,
+          }}
+        >
+          O relatório será gerado no próprio navegador em formato <strong style={{ color: C.text }}>.txt</strong>,
+          compatível com o Bloco de Notas e sem depender deste computador.
+        </div>
+
+        <div style={{ display: "grid", gap: 14 }}>
+          <Field label="Movimentações">
+            <Select value={tipo} onChange={(e) => setTipo(e.target.value)}>
+              <option value="entrada">Somente entradas</option>
+              <option value="saida">Somente saídas</option>
+              <option value="ambos">Entradas + saídas</option>
+            </Select>
+          </Field>
+
+          <Field label="Período">
+            <Select
+              value={modoPeriodo}
+              onChange={(e) => setModoPeriodo(e.target.value)}
+            >
+              <option value="todos">Todos os registros</option>
+              <option value="mes">Mês específico</option>
+              <option value="intervalo">Intervalo de datas</option>
+            </Select>
+          </Field>
+
+          {modoPeriodo === "mes" && (
+            <Field label="Mês">
+              <Input
+                type="month"
+                value={mes}
+                onChange={(e) => setMes(e.target.value)}
+              />
+            </Field>
+          )}
+
+          {modoPeriodo === "intervalo" && (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(2,minmax(0,1fr))",
+                gap: 12,
+              }}
+              className="scrc-grid"
+            >
+              <Field label="Data inicial">
+                <Input
+                  type="date"
+                  value={inicio}
+                  onChange={(e) => setInicio(e.target.value)}
+                />
+              </Field>
+              <Field label="Data final">
+                <Input
+                  type="date"
+                  value={fim}
+                  onChange={(e) => setFim(e.target.value)}
+                />
+              </Field>
+            </div>
+          )}
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 12,
+              paddingTop: 14,
+              marginTop: 2,
+              borderTop: `1px solid ${C.border}`,
+            }}
+          >
+            <div style={{ color: C.textDim, fontSize: 12.5 }}>
+              <strong style={{ color: C.text }}>{quantidade}</strong>{" "}
+              movimentação{quantidade === 1 ? "" : "ões"} no relatório
+            </div>
+
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn variant="ghost" onClick={onClose}>
+                Cancelar
+              </Btn>
+              <Btn onClick={gerar} disabled={quantidade === 0}>
+                <Download size={14} /> Gerar .TXT
+              </Btn>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /* ---------------------------------------------------------------------
    MODAL: EDITAR CARGA

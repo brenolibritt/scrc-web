@@ -51,3 +51,29 @@ export async function criarAnaliseLaboratorio(payload) {
   if (error) throw error;
   return data;
 }
+
+
+export async function listarAnalisesLaboratorioAdmin() {
+  const { data, error } = await supabase
+    .from("scrc_laboratorio")
+    .select(
+      "id,carga_id,tipo_movimento,data_referencia,placa,nota_fiscal,produto,temperatura,densidade,api,user_id,conferido,created_at,updated_at"
+    )
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  return data || [];
+}
+
+export async function conferirAnaliseLaboratorio(analiseId, conferido = true) {
+  const { error } = await supabase.rpc(
+    "scrc_conferir_analise_laboratorio",
+    {
+      p_analise_id: analiseId,
+      p_conferido: conferido,
+    }
+  );
+
+  if (error) throw error;
+  return true;
+}

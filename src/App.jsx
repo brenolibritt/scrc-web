@@ -10,6 +10,7 @@ import {
 } from "recharts";
 import { storageGet, storageSet } from "./lib/storage.js";
 import { supabase } from "./lib/supabaseClient.js";
+import { listarAnalisesLaboratorio, criarAnaliseLaboratorio } from "./lib/laboratorio.js";
 
 /* ---------------------------------------------------------------------
    TOKENS
@@ -928,15 +929,10 @@ export default function App() {
       {/* CONTENT */}
       <div style={{ padding: 24 }}>
         {isLaboratorio ? (
-          <Card style={{ textAlign: "center", padding: "48px 24px" }}>
-            <Gauge size={30} color={C.steel} style={{ marginBottom: 12 }} />
-            <SectionTitle eyebrow="Acesso autorizado" title="Módulo Laboratório" />
-            <div style={{ color: C.textDim, fontSize: 14, lineHeight: 1.6, maxWidth: 620, margin: "0 auto" }}>
-              Perfil do Laboratório reconhecido com sucesso. Nesta etapa, o acesso às áreas
-              administrativas permanece bloqueado. A tela exclusiva para lançamento de
-              Temperatura, Densidade e API será adicionada no próximo passo.
-            </div>
-          </Card>
+          <LaboratorioModulo
+            cadastros={cadastros}
+            onToast={showToast}
+          />
         ) : (
           <>
         {tab === "lancar" && (
@@ -1003,6 +999,422 @@ export default function App() {
     </div>
   );
 }
+
+
+function LaboratorioModulo({ cadastros, onToast }) {
+  const hoje = new Date().toISOString().slice(0, 10);
+
+  const [form, setForm] = useState({
+    tipo_movimento: "ENTRADA",
+    data_referencia: hoje,
+    placa: "",
+    nota_fiscal: "",
+    produto: "Petróleo Bruto",
+    temperatura: "",
+    densidade: "",
+    api: "",
+  });
+
+  const [analises, setAnalises] = useState([]);
+  const [carregando, setCarregando] = useState(true);
+  const [salvando, setSalvando] = useState(false);
+
+  const veiculosAtivos = useMemo(
+    () => (cadastros?.veiculos || []).filter((v) => v.status === "ATIVO"),
+    [cadastros]
+  );
+
+  const produtosAtivos = useMemo(
+    () => (cadastros?.produtos || []).filter((p) => p.status === "ATIVO"),
+    [cadastros]
+  );
+
+  const carregarAnalises = useCallback(async () => {
+    setCarregando(true);
+    try {
+      const data = await listarAnalisesLaboratorio();
+      setAnalises(data);
+    } catch (error) {
+      console.error("Erro ao carregar análises laboratoriais:", error);
+      onToast?.(
+        "Não foi possível carregar o histórico do Laboratório: " +
+          (error?.message || "erro desconhecido"),
+        "err"
+      );
+    } finally {
+      setCarregando(false);
+    }
+  }, [onToast]);
+
+  useEffect(() => {
+    void carregarAnalises();
+  }, [carregarAnalises]);
+
+  const set = (key) => (event) => {
+    setForm((current) => ({ ...current, [key]: event.target.value }));
+  };
+
+  const camposValidos =
+    form.tipo_movimento &&
+    form.data_referencia &&
+    form.placa.trim() &&
+    form.produto.trim() &&
+    String(form.temperatura).trim() &&
+    String(form.densidade).trim() &&
+    String(form.api).trim();
+
+  const salvar = async () => {
+    if (!camposValidos || salvando) return;
+
+    setSalvando(true);
+    try {
+      await criarAnaliseLaboratorio({
+        tipo_movimento: form.tipo_movimento,
+        data_referencia: form.data_referencia,
+        placa: form.placa.trim().toUpperCase(),
+        nota_fiscal: form.nota_fiscal.trim() || null,
+        produto: form.produto.trim(),
+        temperatura: num(form.temperatura),
+        densidade: num(form.densidade),
+        api: num(form.api),
+      });
+
+      onToast?.("Análise laboratorial registrada com sucesso.");
+
+      setForm((current) => ({
+        ...current,
+        nota_fiscal: "",
+        temperatura: "",
+        densidade: "",
+        api: "",
+      }));
+
+      await carregarAnalises();
+    } catch (error) {
+      console.error("Erro ao registrar análise laboratorial:", error);
+      onToast?.(
+        "Não foi possível registrar a análise: " +
+          (error?.message || "erro desconhecido"),
+        "err"
+      );
+    } finally {
+      setSalvando(false);
+    }
+  };
+
+  const fmtDataHora = (value) => {
+    if (!value) return "—";
+    try {
+      return new Date(value).toLocaleString("pt-BR");
+    } catch (_) {
+      return value;
+    }
+  };
+
+  return (
+    <div style={{ display: "grid", gap: 20 }}>
+      <Card>
+        <SectionTitle
+          eyebrow="Acesso exclusivo"
+          title="Laboratório"
+        />
+
+        <div
+          style={{
+            background: "#1B2530",
+            border: `1px solid ${C.steel}44`,
+            borderRadius: 6,
+            padding: "12px 14px",
+            color: C.textDim,
+            fontSize: 12.5,
+            lineHeight: 1.55,
+            marginBottom: 18,
+          }}
+        >
+          Informe a carga de referência e os três resultados do Laboratório.
+          Estes dados são apenas para consulta dos Administradores e não
+          preenchem nem alteram automaticamente os lançamentos de Entrada ou Saída.
+        </div>
+
+        <div style={{ display: "grid", gap: 16 }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(2,minmax(0,1fr))",
+              gap: 12,
+            }}
+            className="scrc-grid"
+          >
+            <Field label="Movimento" required>
+              <Select
+                value={form.tipo_movimento}
+                onChange={set("tipo_movimento")}
+              >
+                <option value="ENTRADA">Entrada</option>
+                <option value="SAIDA">Saída</option>
+              </Select>
+            </Field>
+
+            <Field label="Data de referência" required>
+              <Input
+                type="date"
+                value={form.data_referencia}
+                onChange={set("data_referencia")}
+              />
+            </Field>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(2,minmax(0,1fr))",
+              gap: 12,
+            }}
+            className="scrc-grid"
+          >
+            <Field
+              label="Placa / conjunto"
+              required
+              hint="Identificação da carga que receberá estes resultados."
+            >
+              {veiculosAtivos.length > 0 ? (
+                <Select value={form.placa} onChange={set("placa")}>
+                  <option value="">Selecione…</option>
+                  {veiculosAtivos.map((v) => (
+                    <option key={v.id} value={v.placa}>
+                      {v.placa}
+                    </option>
+                  ))}
+                </Select>
+              ) : (
+                <Input
+                  value={form.placa}
+                  onChange={set("placa")}
+                  placeholder="Ex.: ABC1D23 / XYZ9A99"
+                />
+              )}
+            </Field>
+
+            <Field
+              label="Nota fiscal"
+              hint="Recomendado para facilitar a identificação da carga."
+            >
+              <Input
+                value={form.nota_fiscal}
+                onChange={set("nota_fiscal")}
+                placeholder="NF-000"
+              />
+            </Field>
+          </div>
+
+          <Field label="Produto" required>
+            {produtosAtivos.length > 0 ? (
+              <Select value={form.produto} onChange={set("produto")}>
+                <option value="">Selecione…</option>
+                {produtosAtivos.map((p) => (
+                  <option key={p.id} value={p.nome}>
+                    {p.nome}
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              <Input
+                value={form.produto}
+                onChange={set("produto")}
+                placeholder="Produto"
+              />
+            )}
+          </Field>
+
+          <div
+            style={{
+              marginTop: 4,
+              paddingTop: 16,
+              borderTop: `1px solid ${C.border}`,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                letterSpacing: "0.09em",
+                textTransform: "uppercase",
+                color: C.steel,
+                fontWeight: 700,
+                marginBottom: 12,
+              }}
+            >
+              Resultados laboratoriais
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(3,minmax(0,1fr))",
+                gap: 12,
+              }}
+              className="scrc-grid"
+            >
+              <Field label="Temperatura (°C)" required>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={form.temperatura}
+                  onChange={set("temperatura")}
+                  placeholder="0,00"
+                />
+              </Field>
+
+              <Field label="Densidade" required>
+                <Input
+                  type="number"
+                  step="0.0001"
+                  value={form.densidade}
+                  onChange={set("densidade")}
+                  placeholder="0,0000"
+                />
+              </Field>
+
+              <Field label="API" required>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={form.api}
+                  onChange={set("api")}
+                  placeholder="0,00"
+                />
+              </Field>
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              marginTop: 4,
+            }}
+          >
+            <Btn
+              onClick={salvar}
+              disabled={!camposValidos || salvando}
+              style={{
+                opacity: !camposValidos || salvando ? 0.55 : 1,
+                pointerEvents: !camposValidos || salvando ? "none" : "auto",
+              }}
+            >
+              <Save size={14} />
+              {salvando ? "Salvando…" : "Registrar análise"}
+            </Btn>
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        <SectionTitle
+          eyebrow={`${analises.length} registro${analises.length === 1 ? "" : "s"}`}
+          title="Análises registradas"
+        />
+
+        {carregando ? (
+          <div style={{ color: C.textDim, fontSize: 13 }}>
+            carregando análises…
+          </div>
+        ) : analises.length === 0 ? (
+          <div
+            style={{
+              color: C.textDim,
+              fontSize: 13,
+              padding: "18px 0",
+            }}
+          >
+            Nenhuma análise laboratorial registrada.
+          </div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                minWidth: 960,
+                fontSize: 12.5,
+              }}
+            >
+              <thead>
+                <tr>
+                  {[
+                    "Data",
+                    "Movimento",
+                    "Placa",
+                    "NF",
+                    "Produto",
+                    "Temperatura",
+                    "Densidade",
+                    "API",
+                    "Status",
+                    "Registrado em",
+                  ].map((label) => (
+                    <th
+                      key={label}
+                      style={{
+                        textAlign: "left",
+                        color: C.textDim,
+                        background: C.panelAlt,
+                        borderBottom: `1px solid ${C.border}`,
+                        padding: "9px 10px",
+                        fontSize: 10.5,
+                        letterSpacing: ".06em",
+                        textTransform: "uppercase",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {analises.map((a) => (
+                  <tr key={a.id}>
+                    <td style={labTd}>{a.data_referencia || "—"}</td>
+                    <td style={labTd}>{a.tipo_movimento || "—"}</td>
+                    <td style={{ ...labTd, fontFamily: MONO }}>{a.placa || "—"}</td>
+                    <td style={labTd}>{a.nota_fiscal || "—"}</td>
+                    <td style={labTd}>{a.produto || "—"}</td>
+                    <td style={{ ...labTd, fontFamily: MONO }}>
+                      {Number(a.temperatura).toLocaleString("pt-BR", { maximumFractionDigits: 2 })} °C
+                    </td>
+                    <td style={{ ...labTd, fontFamily: MONO }}>
+                      {Number(a.densidade).toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 4 })}
+                    </td>
+                    <td style={{ ...labTd, fontFamily: MONO }}>
+                      {Number(a.api).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}
+                    </td>
+                    <td style={labTd}>
+                      <Pill
+                        text={a.conferido ? "Conferido" : "Disponível"}
+                        fg={a.conferido ? C.green : C.yellow}
+                        bg={a.conferido ? C.greenBg : C.yellowBg}
+                      />
+                    </td>
+                    <td style={{ ...labTd, whiteSpace: "nowrap" }}>
+                      {fmtDataHora(a.created_at)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+const labTd = {
+  padding: "10px",
+  borderBottom: `1px solid ${C.border}`,
+  color: C.text,
+  verticalAlign: "middle",
+};
 
 function LoginModal({ onClose, onCancel, onSubmit, onVerify }) {
   const [email, setEmail] = useState("");

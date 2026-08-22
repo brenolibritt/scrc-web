@@ -10,7 +10,12 @@ import {
 } from "recharts";
 import { storageGet, storageSet } from "./lib/storage.js";
 import { supabase } from "./lib/supabaseClient.js";
-import { listarAnalisesLaboratorio, criarAnaliseLaboratorio } from "./lib/laboratorio.js";
+import {
+  listarAnalisesLaboratorio,
+  criarAnaliseLaboratorio,
+  listarAnalisesLaboratorioAdmin,
+  conferirAnaliseLaboratorio,
+} from "./lib/laboratorio.js";
 
 /* ---------------------------------------------------------------------
    TOKENS
@@ -767,7 +772,12 @@ export default function App() {
         { id: "historico", label: "Histórico", icon: ClipboardList },
         { id: "painel", label: "Painel Resumo", icon: LayoutDashboard },
         { id: "cadastros", label: "Cadastros", icon: Warehouse },
-        ...(isAdmin ? [{ id: "config", label: "Configurações", icon: Settings }] : []),
+        ...(isAdmin
+          ? [
+              { id: "laboratorio_admin", label: "Laboratório", icon: Gauge },
+              { id: "config", label: "Configurações", icon: Settings },
+            ]
+          : []),
       ];
 
   if (loading || !authReady) {
@@ -978,6 +988,9 @@ export default function App() {
         {tab === "cadastros" && (
           <Cadastros cadastros={cadastros} cargas={cargas} isAdmin={isAdmin} onSave={persistCadastros} config={config} />
         )}
+        {tab === "laboratorio_admin" && isAdmin && (
+          <LaboratorioAdminConsulta onToast={showToast} />
+        )}
         {tab === "config" && isAdmin && (
           <Configuracoes config={config} cadastros={cadastros} onSave={(next) => { persistConfig(next); showToast("Configurações salvas."); }} />
         )}
@@ -1000,6 +1013,340 @@ export default function App() {
   );
 }
 
+
+
+function LaboratorioAdminConsulta({ onToast }) {
+  const [analises, setAnalises] = useState([]);
+  const [carregando, setCarregando] = useState(true);
+  const [processandoId, setProcessandoId] = useState(null);
+  const [filtroStatus, setFiltroStatus] = useState("todos");
+  const [query, setQuery] = useState("");
+
+  const carregar = useCallback(async () => {
+    setCarregando(true);
+    try {
+      const data = await listarAnalisesLaboratorioAdmin();
+      setAnalises(data);
+    } catch (error) {
+      console.error("Erro ao carregar análises para o Administrador:", error);
+      onToast?.(
+        "Não foi possível carregar as análises do Laboratório: " +
+          (error?.message || "erro desconhecido"),
+        "err"
+      );
+    } finally {
+      setCarregando(false);
+    }
+  }, [onToast]);
+
+  useEffect(() => {
+    void carregar();
+  }, [carregar]);
+
+  const filtradas = useMemo(() => {
+    const q = query.trim().toLowerCase();
+
+    return analises.filter((a) => {
+      if (filtroStatus === "disponivel" && a.conferido) return false;
+      if (filtroStatus === "conferido" && !a.conferido) return false;
+
+      if (!q) return true;
+
+      return [
+        a.tipo_movimento,
+        a.data_referencia,
+        a.placa,
+        a.nota_fiscal,
+        a.produto,
+        a.temperatura,
+        a.densidade,
+        a.api,
+      ]
+        .map((v) => String(v ?? "").toLowerCase())
+        .join(" ")
+        .includes(q);
+    });
+  }, [analises, filtroStatus, query]);
+
+  const alterarConferencia = async (analise) => {
+    if (processandoId) return;
+
+    setProcessandoId(analise.id);
+    try {
+      await conferirAnaliseLaboratorio(analise.id, !analise.conferido);
+
+      setAnalises((atuais) =>
+        atuais.map((item) =>
+          item.id === analise.id
+            ? { ...item, conferido: !analise.conferido }
+            : item
+        )
+      );
+
+      onToast?.(
+        analise.conferido
+          ? "Análise marcada novamente como disponível."
+          : "Análise marcada como conferida."
+      );
+    } catch (error) {
+      console.error("Erro ao alterar conferência:", error);
+      onToast?.(
+        "Não foi possível atualizar a conferência: " +
+          (error?.message || "erro desconhecido"),
+        "err"
+      );
+    } finally {
+      setProcessandoId(null);
+    }
+  };
+
+  const fmtData = (value) => {
+    if (!value) return "—";
+    const parts = String(value).split("-");
+    return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : value;
+  };
+
+  const fmtDataHora = (value) => {
+    if (!value) return "—";
+    try {
+      return new Date(value).toLocaleString("pt-BR");
+    } catch (_) {
+      return value;
+    }
+  };
+
+  return (
+    <div style={{ display: "grid", gap: 18 }}>
+      <div>
+        <SectionTitle
+          eyebrow={`${analises.length} análise${analises.length === 1 ? "" : "s"} registrada${analises.length === 1 ? "" : "s"}`}
+          title="Consulta do Laboratório"
+        />
+        <div
+          style={{
+            color: C.textDim,
+            fontSize: 12.5,
+            lineHeight: 1.55,
+            marginTop: -8,
+          }}
+        >
+          Dados laboratoriais somente para consulta. Temperatura, Densidade e API
+          não são transferidos automaticamente para os lançamentos de carga.
+        </div>
+      </div>
+
+      <Card style={{ padding: 14 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1.5fr 220px auto",
+            gap: 10,
+            alignItems: "end",
+          }}
+          className="scrc-grid"
+        >
+          <Field label="Pesquisar">
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Placa, NF, produto, API, densidade..."
+            />
+          </Field>
+
+          <Field label="Status">
+            <Select
+              value={filtroStatus}
+              onChange={(e) => setFiltroStatus(e.target.value)}
+            >
+              <option value="todos">Todos</option>
+              <option value="disponivel">Análise disponível</option>
+              <option value="conferido">Conferido</option>
+            </Select>
+          </Field>
+
+          <Btn variant="ghost" onClick={carregar}>
+            <Search size={13} /> Atualizar
+          </Btn>
+        </div>
+      </Card>
+
+      {carregando ? (
+        <Card>
+          <div style={{ color: C.textDim, fontSize: 13 }}>
+            carregando análises do Laboratório…
+          </div>
+        </Card>
+      ) : filtradas.length === 0 ? (
+        <Card style={{ textAlign: "center", padding: "36px 20px" }}>
+          <Droplets size={24} color={C.textFaint} style={{ marginBottom: 10 }} />
+          <div style={{ color: C.textDim, fontSize: 13 }}>
+            Nenhuma análise encontrada para os filtros informados.
+          </div>
+        </Card>
+      ) : (
+        <div style={{ display: "grid", gap: 12 }}>
+          {filtradas.map((a) => (
+            <Card key={a.id} style={{ padding: 16 }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "flex-start",
+                  gap: 12,
+                  flexWrap: "wrap",
+                  marginBottom: 14,
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      fontFamily: MONO,
+                      color: C.accent,
+                      fontSize: 11,
+                      letterSpacing: ".08em",
+                      textTransform: "uppercase",
+                      marginBottom: 5,
+                    }}
+                  >
+                    {a.tipo_movimento} • {fmtData(a.data_referencia)}
+                  </div>
+
+                  <div
+                    style={{
+                      fontFamily: DISPLAY,
+                      fontSize: 19,
+                      fontWeight: 800,
+                      color: C.text,
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {a.placa || "Placa não informada"}
+                  </div>
+
+                  <div
+                    style={{
+                      color: C.textDim,
+                      fontSize: 12.5,
+                      marginTop: 4,
+                    }}
+                  >
+                    NF: <strong style={{ color: C.text }}>{a.nota_fiscal || "—"}</strong>
+                    {" • "}
+                    Produto: <strong style={{ color: C.text }}>{a.produto || "—"}</strong>
+                  </div>
+                </div>
+
+                <Pill
+                  text={a.conferido ? "Conferido" : "Análise disponível"}
+                  fg={a.conferido ? C.green : C.yellow}
+                  bg={a.conferido ? C.greenBg : C.yellowBg}
+                />
+              </div>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(3,minmax(0,1fr))",
+                  gap: 10,
+                  marginBottom: 14,
+                }}
+                className="scrc-grid"
+              >
+                {[
+                  {
+                    label: "Temperatura",
+                    value: `${Number(a.temperatura).toLocaleString("pt-BR", {
+                      maximumFractionDigits: 2,
+                    })} °C`,
+                  },
+                  {
+                    label: "Densidade",
+                    value: Number(a.densidade).toLocaleString("pt-BR", {
+                      minimumFractionDigits: 3,
+                      maximumFractionDigits: 4,
+                    }),
+                  },
+                  {
+                    label: "API",
+                    value: Number(a.api).toLocaleString("pt-BR", {
+                      maximumFractionDigits: 2,
+                    }),
+                  },
+                ].map((item) => (
+                  <div
+                    key={item.label}
+                    style={{
+                      background: C.panelAlt,
+                      border: `1px solid ${C.border}`,
+                      borderRadius: 5,
+                      padding: "12px 14px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 10.5,
+                        color: C.textDim,
+                        letterSpacing: ".07em",
+                        textTransform: "uppercase",
+                        marginBottom: 5,
+                      }}
+                    >
+                      {item.label}
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: MONO,
+                        fontSize: 18,
+                        fontWeight: 700,
+                        color: C.text,
+                      }}
+                    >
+                      {item.value}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  flexWrap: "wrap",
+                  paddingTop: 12,
+                  borderTop: `1px solid ${C.border}`,
+                }}
+              >
+                <div style={{ fontSize: 11.5, color: C.textFaint }}>
+                  Registrado em: {fmtDataHora(a.created_at)}
+                  {a.carga_id ? ` • Carga vinculada: ${a.carga_id}` : ""}
+                </div>
+
+                <Btn
+                  variant="ghost"
+                  onClick={() => alterarConferencia(a)}
+                  disabled={processandoId === a.id}
+                  style={{
+                    opacity: processandoId === a.id ? 0.55 : 1,
+                    pointerEvents: processandoId === a.id ? "none" : "auto",
+                  }}
+                >
+                  <Check size={13} />
+                  {processandoId === a.id
+                    ? "Atualizando…"
+                    : a.conferido
+                      ? "Marcar como disponível"
+                      : "Marcar como conferido"}
+                </Btn>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function LaboratorioModulo({ cadastros, onToast }) {
   const hoje = new Date().toISOString().slice(0, 10);
@@ -1679,7 +2026,33 @@ function LancarCarga({ cadastros, config, onSave, tipo = "entrada" }) {
     produto: config.aplicarProdutoPadrao ? config.produtoPadrao : "",
     status: tipo === "saida" ? STATUS_SAIDA : (config.statusPadrao || "PENDENTE"),
   }));
+  const [analisesLaboratorio, setAnalisesLaboratorio] = useState([]);
+  const [carregandoLaboratorio, setCarregandoLaboratorio] = useState(true);
+
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  useEffect(() => {
+    let ativo = true;
+
+    const carregarLaboratorio = async () => {
+      setCarregandoLaboratorio(true);
+      try {
+        const data = await listarAnalisesLaboratorioAdmin();
+        if (ativo) setAnalisesLaboratorio(data || []);
+      } catch (error) {
+        console.error("Erro ao carregar referências do Laboratório:", error);
+        if (ativo) setAnalisesLaboratorio([]);
+      } finally {
+        if (ativo) setCarregandoLaboratorio(false);
+      }
+    };
+
+    void carregarLaboratorio();
+
+    return () => {
+      ativo = false;
+    };
+  }, []);
 
   const calc = useMemo(() => computeCarga(form, cadastros.veiculos, config), [form, cadastros.veiculos, config]);
   const isSaida = tipo === "saida";
@@ -1691,6 +2064,47 @@ function LancarCarga({ cadastros, config, onSave, tipo = "entrada" }) {
   const tanquesAtivos = cadastros.tanques.filter((t) => t.status === "ATIVO");
   const motoristasAtivos = cadastros.motoristas.filter((m) => m.status === "ATIVO");
   const fornecedoresAtivos = cadastros.fornecedores.filter((f) => f.status === "ATIVO");
+
+  const referenciasLaboratorio = useMemo(() => {
+    const movimentoEsperado = isSaida ? "SAIDA" : "ENTRADA";
+    const placa = String(form.placa || "").trim().toUpperCase();
+    const nf = String(form.notaFiscal || "").trim().toLowerCase();
+    const produto = String(form.produto || "").trim().toLowerCase();
+    const data = String(form.data || "").trim();
+
+    return (analisesLaboratorio || [])
+      .filter((a) => String(a.tipo_movimento || "").toUpperCase() === movimentoEsperado)
+      .map((a) => {
+        let pontos = 0;
+
+        if (placa && String(a.placa || "").trim().toUpperCase() === placa) pontos += 4;
+        if (nf && String(a.nota_fiscal || "").trim().toLowerCase() === nf) pontos += 4;
+        if (produto && String(a.produto || "").trim().toLowerCase() === produto) pontos += 2;
+        if (data && String(a.data_referencia || "") === data) pontos += 2;
+
+        return { ...a, _pontos: pontos };
+      })
+      .filter((a) => {
+        // Sem qualquer identificação preenchida, mostra apenas as análises
+        // mais recentes do mesmo tipo de movimento.
+        if (!placa && !nf && !produto && !data) return true;
+
+        // Com dados preenchidos, exige ao menos uma correspondência.
+        return a._pontos > 0;
+      })
+      .sort((a, b) => {
+        if (b._pontos !== a._pontos) return b._pontos - a._pontos;
+        return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+      })
+      .slice(0, 5);
+  }, [
+    analisesLaboratorio,
+    isSaida,
+    form.placa,
+    form.notaFiscal,
+    form.produto,
+    form.data,
+  ]);
 
   const requiredOk = form.data && form.placa && form.produto && form.tanque &&
     form.ofertado && form.pesoBruto && form.tara && form.densidade;
@@ -1820,6 +2234,133 @@ function LancarCarga({ cadastros, config, onSave, tipo = "entrada" }) {
 
       {/* LIVE PREVIEW */}
       <div style={{ display: "flex", flexDirection: "column", gap: 20, alignSelf: "start", position: "sticky", top: 0 }}>
+      <Card>
+        <SectionTitle eyebrow="Consulta" title="Referência do Laboratório" />
+
+        <div
+          style={{
+            background: "#1B2530",
+            border: `1px solid ${C.steel}44`,
+            borderRadius: 5,
+            padding: "10px 12px",
+            marginTop: -6,
+            marginBottom: 12,
+            color: C.textDim,
+            fontSize: 11.5,
+            lineHeight: 1.5,
+          }}
+        >
+          Esta área é somente para conferência. Os valores abaixo <strong style={{ color: C.text }}>não preenchem</strong>{" "}
+          API ou Densidade automaticamente no lançamento.
+        </div>
+
+        {carregandoLaboratorio ? (
+          <div style={{ color: C.textDim, fontSize: 12.5 }}>
+            Consultando análises disponíveis…
+          </div>
+        ) : referenciasLaboratorio.length === 0 ? (
+          <div
+            style={{
+              border: `1px dashed ${C.border}`,
+              borderRadius: 5,
+              padding: "14px 12px",
+              color: C.textFaint,
+              fontSize: 12.5,
+              lineHeight: 1.5,
+            }}
+          >
+            Nenhuma análise do Laboratório encontrada para os dados informados nesta carga.
+          </div>
+        ) : (
+          <div style={{ display: "grid", gap: 10 }}>
+            {referenciasLaboratorio.map((a, index) => (
+              <div
+                key={a.id}
+                style={{
+                  border: `1px solid ${index === 0 ? C.accent + "55" : C.border}`,
+                  background: index === 0 ? `${C.accentDim}18` : C.panelAlt,
+                  borderRadius: 6,
+                  padding: 12,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 8,
+                    marginBottom: 9,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontFamily: MONO,
+                      fontSize: 10.5,
+                      color: index === 0 ? C.accent : C.textDim,
+                      textTransform: "uppercase",
+                      letterSpacing: ".06em",
+                    }}
+                  >
+                    {index === 0 ? "Melhor correspondência" : "Possível correspondência"}
+                  </div>
+
+                  <Pill
+                    text={a.conferido ? "Conferido" : "Disponível"}
+                    fg={a.conferido ? C.green : C.yellow}
+                    bg={a.conferido ? C.greenBg : C.yellowBg}
+                  />
+                </div>
+
+                <div style={{ fontSize: 12, color: C.textDim, marginBottom: 9, lineHeight: 1.45 }}>
+                  <strong style={{ color: C.text }}>{a.placa || "Sem placa"}</strong>
+                  {" • "}
+                  {a.data_referencia || "Sem data"}
+                  {" • NF "}
+                  {a.nota_fiscal || "—"}
+                  {" • "}
+                  {a.produto || "—"}
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(3,minmax(0,1fr))",
+                    gap: 8,
+                  }}
+                >
+                  <div style={{ background: C.bg, borderRadius: 4, padding: "8px 9px" }}>
+                    <div style={{ color: C.textFaint, fontSize: 9.5, textTransform: "uppercase", letterSpacing: ".05em" }}>
+                      Temperatura
+                    </div>
+                    <div style={{ color: C.text, fontFamily: MONO, marginTop: 3, fontWeight: 700 }}>
+                      {Number(a.temperatura).toLocaleString("pt-BR", { maximumFractionDigits: 2 })} °C
+                    </div>
+                  </div>
+
+                  <div style={{ background: C.bg, borderRadius: 4, padding: "8px 9px" }}>
+                    <div style={{ color: C.textFaint, fontSize: 9.5, textTransform: "uppercase", letterSpacing: ".05em" }}>
+                      Densidade
+                    </div>
+                    <div style={{ color: C.text, fontFamily: MONO, marginTop: 3, fontWeight: 700 }}>
+                      {Number(a.densidade).toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 4 })}
+                    </div>
+                  </div>
+
+                  <div style={{ background: C.bg, borderRadius: 4, padding: "8px 9px" }}>
+                    <div style={{ color: C.textFaint, fontSize: 9.5, textTransform: "uppercase", letterSpacing: ".05em" }}>
+                      API
+                    </div>
+                    <div style={{ color: C.text, fontFamily: MONO, marginTop: 3, fontWeight: 700 }}>
+                      {Number(a.api).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
       <Card>
         <SectionTitle eyebrow="Cálculo automático" title="Prévia" />
         <div style={{ display: "grid", gap: 10, fontFamily: MONO }}>

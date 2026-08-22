@@ -62,6 +62,11 @@ const monthKey = (isoDate) => (isoDate ? isoDate.slice(0, 7) : "—");
 
 const fmtL = (v) => `${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L`;
 const fmtKg = (v) => `${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`;
+const fmtBR = (v) =>
+  num(v).toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 const fmtR = (v) =>
   `R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 

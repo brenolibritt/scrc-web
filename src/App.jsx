@@ -176,6 +176,7 @@ function montarResumoRelatorio(registros, veiculos, config) {
     valorFrete: 0,
     tributos: 0,
     valorTotal: 0,
+    divergenciaTotal: 0,
     alertasDivergencia: 0,
     fornecedores: new Set(),
     motoristas: new Set(),
@@ -193,6 +194,7 @@ function montarResumoRelatorio(registros, veiculos, config) {
     resumo.valorFrete += calc.valorFrete;
     resumo.tributos += calc.totalTributos;
     resumo.valorTotal += calc.valorTotal;
+    resumo.divergenciaTotal += calc.divergencia;
     if (calc.divergenciaAlta) resumo.alertasDivergencia += 1;
 
     if (row.fornecedor) resumo.fornecedores.add(row.fornecedor);
@@ -264,8 +266,15 @@ function montarSecaoCargasRelatorio(titulo, registros, cadastros, config) {
       "DADOS FINANCEIROS",
       `Custo unitário: ${row.custoUnit ? formatarMoedaRelatorio(row.custoUnit) + "/L" : "—"}`,
       `Frete unitário: ${row.frete ? formatarMoedaRelatorio(row.frete) + "/L" : "—"}`,
-      `Valor do frete: ${formatarMoedaRelatorio(calc.valorFrete)}`,
-      `Tributos calculados: ${formatarMoedaRelatorio(calc.totalTributos)}`,
+      `Valor do produto calculado: ${formatarMoedaRelatorio(calc.valorProduto)}`,
+      `Valor do frete calculado: ${formatarMoedaRelatorio(calc.valorFrete)}`,
+      `ICMS calculado: ${formatarMoedaRelatorio(calc.icms)}`,
+      `PIS calculado: ${formatarMoedaRelatorio(calc.pis)}`,
+      `COFINS calculado: ${formatarMoedaRelatorio(calc.cofins)}`,
+      titulo.includes("SAÍDA")
+        ? `CIDE calculada: ${formatarMoedaRelatorio(calc.cide)}`
+        : null,
+      `Total de tributos calculados: ${formatarMoedaRelatorio(calc.totalTributos)}`,
       `Valor total calculado: ${formatarMoedaRelatorio(calc.valorTotal)}`,
       row.observacoes ? `Observações: ${row.observacoes}` : null,
       "",
@@ -371,7 +380,13 @@ function gerarConteudoRelatorioTxt({
     const [ano, mes] = periodo.mes.split("-");
     periodoTexto = `${mes}/${ano}`;
   } else if (periodo.modo === "intervalo") {
-    periodoTexto = `${normalizarDataRelatorio(periodo.inicio) || "Início"} até ${normalizarDataRelatorio(periodo.fim) || "Fim"}`;
+    const inicioTexto = periodo.inicio
+      ? normalizarDataRelatorio(periodo.inicio)
+      : "sem data inicial";
+    const fimTexto = periodo.fim
+      ? normalizarDataRelatorio(periodo.fim)
+      : "sem data final";
+    periodoTexto = `${inicioTexto} até ${fimTexto}`;
   }
 
   const linha = "=".repeat(76);
@@ -399,6 +414,39 @@ function gerarConteudoRelatorioTxt({
     );
   }
 
+  const resumoTipo = (titulo, r) => [
+    titulo,
+    "-".repeat(76),
+    `Quantidade de cargas: ${r.quantidade}`,
+    `Volume ofertado: ${formatarNumeroRelatorio(r.volumeOfertado)} L`,
+    `Volume líquido calculado: ${formatarNumeroRelatorio(r.volumeLiquido)} L`,
+    `Peso bruto: ${formatarNumeroRelatorio(r.pesoBruto)} kg`,
+    `Peso líquido calculado: ${formatarNumeroRelatorio(r.pesoLiquido)} kg`,
+    `Divergência acumulada: ${formatarNumeroRelatorio(r.divergenciaTotal)} ${config?.unidadeDivergencia || "L"}`,
+    `Valor de frete calculado: ${formatarMoedaRelatorio(r.valorFrete)}`,
+    `Tributos calculados: ${formatarMoedaRelatorio(r.tributos)}`,
+    `Valor total calculado: ${formatarMoedaRelatorio(r.valorTotal)}`,
+    `Alertas de divergência: ${r.alertasDivergencia}`,
+    "",
+  ].join("\n");
+
+  const resumosSeparados = [];
+
+  if (tipo !== "saida") {
+    resumosSeparados.push(
+      resumoTipo("RESUMO DAS ENTRADAS", resumo.rEntrada)
+    );
+  }
+
+  if (tipo !== "entrada") {
+    resumosSeparados.push(
+      resumoTipo("RESUMO DAS SAÍDAS", resumo.rSaida)
+    );
+  }
+
+  const tituloResumoGeral =
+    tipo === "ambos" ? "RESUMO CONSOLIDADO" : "RESUMO GERAL";
+
   return [
     linha,
     "SCRC - SISTEMA DE CONTROLE DE RECEBIMENTO DE CARGAS",
@@ -408,12 +456,23 @@ function gerarConteudoRelatorioTxt({
     `Gerado em: ${dataGeracao} às ${horaGeracao}`,
     `Período analisado: ${periodoTexto}`,
     `Movimentações: ${
-      tipo === "ambos" ? "Entradas e Saídas" : tipo === "entrada" ? "Entradas" : "Saídas"
+      tipo === "ambos"
+        ? "Entradas e Saídas"
+        : tipo === "entrada"
+          ? "Entradas"
+          : "Saídas"
     }`,
     "",
     ...secoes,
+
     linha,
-    "RESUMO GERAL",
+    "RESUMO POR TIPO DE MOVIMENTAÇÃO",
+    linha,
+    "",
+    ...resumosSeparados,
+
+    linha,
+    tituloResumoGeral,
     linha,
     "",
     `Total de cargas de entrada: ${resumo.rEntrada.quantidade}`,
@@ -423,10 +482,11 @@ function gerarConteudoRelatorioTxt({
     `Volume ofertado consolidado: ${formatarNumeroRelatorio(resumo.rGeral.volumeOfertado)} L`,
     `Volume líquido consolidado: ${formatarNumeroRelatorio(resumo.rGeral.volumeLiquido)} L`,
     `Peso bruto consolidado: ${formatarNumeroRelatorio(resumo.rGeral.pesoBruto)} kg`,
-    `Peso líquido calculado: ${formatarNumeroRelatorio(resumo.rGeral.pesoLiquido)} kg`,
-    `Valor de frete calculado: ${formatarMoedaRelatorio(resumo.rGeral.valorFrete)}`,
-    `Tributos calculados: ${formatarMoedaRelatorio(resumo.rGeral.tributos)}`,
-    `Valor total calculado: ${formatarMoedaRelatorio(resumo.rGeral.valorTotal)}`,
+    `Peso líquido consolidado: ${formatarNumeroRelatorio(resumo.rGeral.pesoLiquido)} kg`,
+    `Divergência consolidada: ${formatarNumeroRelatorio(resumo.rGeral.divergenciaTotal)} ${config?.unidadeDivergencia || "L"}`,
+    `Valor de frete consolidado: ${formatarMoedaRelatorio(resumo.rGeral.valorFrete)}`,
+    `Tributos consolidados: ${formatarMoedaRelatorio(resumo.rGeral.tributos)}`,
+    `Valor total consolidado: ${formatarMoedaRelatorio(resumo.rGeral.valorTotal)}`,
     `Alertas de divergência: ${resumo.rGeral.alertasDivergencia}`,
     "",
     "PRODUTOS MOVIMENTADOS",
@@ -437,6 +497,14 @@ function gerarConteudoRelatorioTxt({
     linha,
     "",
     resumo.texto,
+    "",
+    linha,
+    "OBSERVAÇÃO SOBRE AS UNIDADES",
+    linha,
+    "",
+    "Pesos são apresentados em kg.",
+    "Volumes são apresentados em L.",
+    `A divergência segue a unidade configurada no SCRC: ${config?.unidadeDivergencia || "L"}.`,
     "",
     linha,
     "FIM DO RELATÓRIO",
@@ -453,7 +521,8 @@ function baixarRelatorioTxt(conteudo, tipo) {
     String(agora.getDate()).padStart(2, "0"),
   ].join("-");
 
-  const nome = `RELATORIO_SCRC_${tipo.toUpperCase()}_${dataArquivo}.txt`;
+  const tipoArquivo = tipo === "ambos" ? "CONSOLIDADO" : tipo.toUpperCase();
+  const nome = `RELATORIO_SCRC_${tipoArquivo}_${dataArquivo}.txt`;
   const blob = new Blob(["\uFEFF", conteudo], {
     type: "text/plain;charset=utf-8",
   });
@@ -3079,7 +3148,7 @@ function RelatorioTxtModal({
     [modoPeriodo, mes, inicio, fim]
   );
 
-  const quantidade = useMemo(() => {
+  const contagem = useMemo(() => {
     const entrada =
       tipo === "saida"
         ? 0
@@ -3089,10 +3158,24 @@ function RelatorioTxtModal({
         ? 0
         : filtrarCargasRelatorio(cargasSaida, periodo).length;
 
-    return entrada + saida;
+    return {
+      entrada,
+      saida,
+      total: entrada + saida,
+    };
   }, [cargasEntrada, cargasSaida, tipo, periodo]);
 
+  const quantidade = contagem.total;
+
+  const intervaloInvalido =
+    modoPeriodo === "intervalo" &&
+    inicio &&
+    fim &&
+    inicio > fim;
+
   const gerar = () => {
+    if (intervaloInvalido) return;
+
     const conteudo = gerarConteudoRelatorioTxt({
       cargasEntrada,
       cargasSaida,
@@ -3227,29 +3310,46 @@ function RelatorioTxtModal({
           )}
 
           {modoPeriodo === "intervalo" && (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(2,minmax(0,1fr))",
-                gap: 12,
-              }}
-              className="scrc-grid"
-            >
-              <Field label="Data inicial">
-                <Input
-                  type="date"
-                  value={inicio}
-                  onChange={(e) => setInicio(e.target.value)}
-                />
-              </Field>
-              <Field label="Data final">
-                <Input
-                  type="date"
-                  value={fim}
-                  onChange={(e) => setFim(e.target.value)}
-                />
-              </Field>
-            </div>
+            <>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(2,minmax(0,1fr))",
+                  gap: 12,
+                }}
+                className="scrc-grid"
+              >
+                <Field label="Data inicial">
+                  <Input
+                    type="date"
+                    value={inicio}
+                    onChange={(e) => setInicio(e.target.value)}
+                  />
+                </Field>
+                <Field label="Data final">
+                  <Input
+                    type="date"
+                    value={fim}
+                    onChange={(e) => setFim(e.target.value)}
+                  />
+                </Field>
+              </div>
+
+              {intervaloInvalido && (
+                <div
+                  style={{
+                    color: C.red,
+                    background: C.redBg,
+                    border: `1px solid ${C.red}55`,
+                    borderRadius: 4,
+                    padding: "8px 10px",
+                    fontSize: 12,
+                  }}
+                >
+                  A data inicial não pode ser posterior à data final.
+                </div>
+              )}
+            </>
           )}
 
           <div
@@ -3263,16 +3363,30 @@ function RelatorioTxtModal({
               borderTop: `1px solid ${C.border}`,
             }}
           >
-            <div style={{ color: C.textDim, fontSize: 12.5 }}>
+            <div style={{ color: C.textDim, fontSize: 12.5, lineHeight: 1.5 }}>
               <strong style={{ color: C.text }}>{quantidade}</strong>{" "}
               movimentação{quantidade === 1 ? "" : "ões"} no relatório
+              {tipo === "ambos" && (
+                <div style={{ color: C.textFaint, fontSize: 11.5 }}>
+                  {contagem.entrada} entrada{contagem.entrada === 1 ? "" : "s"} +{" "}
+                  {contagem.saida} saída{contagem.saida === 1 ? "" : "s"}
+                </div>
+              )}
             </div>
 
             <div style={{ display: "flex", gap: 8 }}>
               <Btn variant="ghost" onClick={onClose}>
                 Cancelar
               </Btn>
-              <Btn onClick={gerar} disabled={quantidade === 0}>
+              <Btn
+                onClick={gerar}
+                disabled={quantidade === 0 || intervaloInvalido}
+                style={
+                  quantidade === 0 || intervaloInvalido
+                    ? { opacity: 0.45, pointerEvents: "none" }
+                    : {}
+                }
+              >
                 <Download size={14} /> Gerar .TXT
               </Btn>
             </div>

@@ -474,6 +474,7 @@ function gerarConteudoRelatorioTxt({
     }`,
     "",
     ...secoes,
+    "",
 
     linha,
     "RESUMO POR TIPO DE MOVIMENTAÇÃO",

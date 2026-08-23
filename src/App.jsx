@@ -1452,6 +1452,7 @@ export default function App() {
             cadastros={cadastros}
             config={config}
             isAdmin={isAdmin}
+            adminProfile={adminProfile}
             onDeleteEntrada={(id) => { persistCargas(cargas.filter((c) => c.id !== id)); showToast("Carga de entrada excluída."); }}
             onUpdateEntrada={(row) => { persistCargas(cargas.map((c) => (c.id === row.id ? row : c))); showToast("Carga de entrada atualizada."); }}
             onDeleteSaida={(id) => { persistCargasSaida(cargasSaida.filter((c) => c.id !== id)); showToast("Carga de saída excluída."); }}
@@ -3731,7 +3732,7 @@ function PreviewRow({ label, value, accent, warn, big }) {
    TAB: HISTÓRICO
 --------------------------------------------------------------------- */
 function Historico({
-  cargasEntrada, cargasSaida, cadastros, config, isAdmin,
+  cargasEntrada, cargasSaida, cadastros, config, isAdmin, adminProfile,
   onDeleteEntrada, onUpdateEntrada, onDeleteSaida, onUpdateSaida,
 }) {
   const [tipoHistorico, setTipoHistorico] = useState("entrada");
@@ -3942,6 +3943,7 @@ function Historico({
           row={editingRow}
           cadastros={cadastros}
           config={config}
+          adminProfile={adminProfile}
           onClose={() => setEditingRow(null)}
           onSave={(updated) => { onUpdate(updated); setEditingRow(null); }}
         />
@@ -4229,138 +4231,650 @@ function RelatorioTxtModal({
 /* ---------------------------------------------------------------------
    MODAL: EDITAR CARGA
 --------------------------------------------------------------------- */
-function EditCargaModal({ row, cadastros, config, onClose, onSave }) {
+function EditCargaModal({
+  row,
+  cadastros,
+  config,
+  adminProfile,
+  onClose,
+  onSave,
+}) {
   const [form, setForm] = useState(row);
-  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const [motivo, setMotivo] = useState("");
+  const [showReview, setShowReview] = useState(false);
 
-  const calc = useMemo(() => computeCarga(form, cadastros.veiculos, config), [form, cadastros.veiculos, config]);
+  const set = (k) => (e) =>
+    setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const calc = useMemo(
+    () => computeCarga(form, cadastros.veiculos, config),
+    [form, cadastros.veiculos, config]
+  );
 
   const produtosAtivos = cadastros.produtos.filter((p) => p.status === "ATIVO");
   const tanquesAtivos = cadastros.tanques.filter((t) => t.status === "ATIVO");
   const motoristasAtivos = cadastros.motoristas.filter((m) => m.status === "ATIVO");
   const fornecedoresAtivos = cadastros.fornecedores.filter((f) => f.status === "ATIVO");
 
-  const requiredOk = form.data && form.placa && form.produto && form.tanque &&
-    form.ofertado && form.pesoBruto && form.tara && form.densidade;
+  const requiredOk =
+    form.data &&
+    form.placa &&
+    form.produto &&
+    form.tanque &&
+    form.ofertado &&
+    form.pesoBruto &&
+    form.tara &&
+    form.densidade;
+
+  const camposAuditados = [
+    ["data", "Data"],
+    ["chegada", "Chegada"],
+    ["saida", "Saída"],
+    ["placa", "Placa"],
+    ["notaFiscal", "Nota Fiscal"],
+    ["motorista", "Motorista"],
+    ["fornecedor", "Fornecedor"],
+    ["produto", "Produto"],
+    ["api", "API"],
+    ["ofertado", "Ofertado NF"],
+    ["pesoBruto", "Peso bruto"],
+    ["drenagem", "Drenagem de água"],
+    ["tara", "Tara"],
+    ["densidade", "Densidade 20º"],
+    ["bsw", "BS&W"],
+    ["custoUnit", "Custo unitário"],
+    ["frete", "Frete"],
+    ["icms", "ICMS"],
+    ["pis", "PIS"],
+    ["cofins", "COFINS"],
+    ["cide", "CIDE"],
+    ["tanque", "Tanque"],
+    ["status", "Status"],
+    ["lote", "Lote"],
+    ["observacoes", "Observações"],
+  ];
+
+  const alteracoes = useMemo(() => {
+    return camposAuditados
+      .map(([campo, label]) => {
+        const anterior = String(row?.[campo] ?? "");
+        const novo = String(form?.[campo] ?? "");
+        return anterior !== novo
+          ? { campo, label, anterior: anterior || "—", novo: novo || "—" }
+          : null;
+      })
+      .filter(Boolean);
+  }, [form, row]);
+
+  const motivoOk = motivo.trim().length >= 5;
+  const podeRevisar = requiredOk && motivoOk && alteracoes.length > 0;
+
+  const confirmarAlteracoes = () => {
+    if (!podeRevisar) return;
+
+    const fornecedorSelecionado = cadastros.fornecedores.find(
+      (f) => f.nome === form.fornecedor
+    );
+
+    const agora = new Date().toISOString();
+
+    const registroAuditoria = {
+      id: uid(),
+      data: agora,
+      perfil: adminProfile || "Administrador",
+      motivo: motivo.trim(),
+      campos: alteracoes.map((a) => ({
+        campo: a.campo,
+        label: a.label,
+        anterior: a.anterior,
+        novo: a.novo,
+      })),
+    };
+
+    const historicoAnterior = Array.isArray(row.historicoAlteracoes)
+      ? row.historicoAlteracoes
+      : [];
+
+    onSave({
+      ...form,
+      cnpj: fornecedorSelecionado?.cnpj || form.cnpj || "",
+      historicoAlteracoes: [...historicoAnterior, registroAuditoria],
+      ultimaAlteracaoEm: agora,
+      ultimaAlteracaoPor: adminProfile || "Administrador",
+      ultimaAlteracaoMotivo: motivo.trim(),
+    });
+  };
 
   return (
-    <div onClick={onClose} style={{
-      position: "fixed", inset: 0, background: "rgba(0,0,0,.65)", zIndex: 100,
-      display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "24px 16px", overflowY: "auto",
-    }}>
-      <div onClick={(e) => e.stopPropagation()} style={{
-        background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8,
-        padding: 24, width: 720, maxWidth: "100%",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-          <SectionTitle eyebrow="Corrigir lançamento" title="Editar Carga" />
-          <button onClick={onClose} style={{ background: "none", border: "none", color: C.textDim, cursor: "pointer" }}>
+    <>
+      <div
+        onClick={onClose}
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(0,0,0,.65)",
+          zIndex: 100,
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "center",
+          padding: "24px 16px",
+          overflowY: "auto",
+        }}
+      >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            background: C.panel,
+            border: `1px solid ${C.border}`,
+            borderRadius: 8,
+            padding: 24,
+            width: 720,
+            maxWidth: "100%",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: 18,
+            }}
+          >
+            <SectionTitle eyebrow="Correção controlada" title="Editar Carga" />
+            <button
+              onClick={onClose}
+              style={{
+                background: "none",
+                border: "none",
+                color: C.textDim,
+                cursor: "pointer",
+              }}
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          <div
+            style={{
+              background: "#1B2530",
+              border: `1px solid ${C.steel}44`,
+              borderRadius: 5,
+              padding: "10px 12px",
+              color: C.textDim,
+              fontSize: 12,
+              lineHeight: 1.5,
+              marginBottom: 14,
+            }}
+          >
+            Toda edição exige um motivo e gera um registro interno com os campos
+            alterados, valores anteriores e novos valores.
+            {Array.isArray(row.historicoAlteracoes) &&
+              row.historicoAlteracoes.length > 0 && (
+                <div style={{ marginTop: 5, color: C.steel }}>
+                  Este lançamento já possui {row.historicoAlteracoes.length} alteração
+                  {row.historicoAlteracoes.length === 1 ? "" : "ões"} registrada
+                  {row.historicoAlteracoes.length === 1 ? "" : "s"}.
+                </div>
+              )}
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gap: 14,
+              maxHeight: "58vh",
+              overflowY: "auto",
+              paddingRight: 4,
+            }}
+          >
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+              <Field label="Data" required>
+                <Input type="date" value={form.data} onChange={set("data")} />
+              </Field>
+              <Field label="Chegada">
+                <Input type="time" value={form.chegada} onChange={set("chegada")} />
+              </Field>
+              <Field label="Saída">
+                <Input type="time" value={form.saida} onChange={set("saida")} />
+              </Field>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
+              <Field label="Placa carreta" required>
+                <Select value={form.placa} onChange={set("placa")}>
+                  <option value="">Selecione…</option>
+                  {cadastros.veiculos.map((v) => (
+                    <option key={v.id} value={v.placa}>{v.placa}</option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Nota fiscal">
+                <Input value={form.notaFiscal} onChange={set("notaFiscal")} />
+              </Field>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
+              <Field label="Motorista">
+                <Select value={form.motorista} onChange={set("motorista")}>
+                  <option value="">Selecione…</option>
+                  {motoristasAtivos.map((m) => (
+                    <option key={m.id} value={m.nome}>{m.nome}</option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Fornecedor">
+                <Select value={form.fornecedor} onChange={set("fornecedor")}>
+                  <option value="">Selecione…</option>
+                  {fornecedoresAtivos.map((f) => (
+                    <option key={f.id} value={f.nome}>{f.nome}</option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+              <Field label="Produto" required>
+                <Select value={form.produto} onChange={set("produto")}>
+                  <option value="">Selecione…</option>
+                  {produtosAtivos.map((p) => (
+                    <option key={p.id} value={p.nome}>{p.nome}</option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="API">
+                <Input type="number" value={form.api} onChange={set("api")} />
+              </Field>
+              <Field label="Ofertado NF (L)" required>
+                <Input type="number" value={form.ofertado} onChange={set("ofertado")} />
+              </Field>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+              <Field label="Peso bruto (kg)" required>
+                <Input type="number" value={form.pesoBruto} onChange={set("pesoBruto")} />
+              </Field>
+              <Field label="Drenagem água (L)">
+                <Input type="number" value={form.drenagem} onChange={set("drenagem")} />
+              </Field>
+              <Field label="Tara (kg)" required>
+                <Input type="number" value={form.tara} onChange={set("tara")} />
+              </Field>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
+              <Field label="Densidade 20º" required>
+                <Input type="number" step="0.001" value={form.densidade} onChange={set("densidade")} />
+              </Field>
+              <Field label="BS&W (%)">
+                <Input type="number" step="0.01" value={form.bsw} onChange={set("bsw")} />
+              </Field>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
+              <Field label="Custo unitário (R$/L)">
+                <Input type="number" step="0.01" value={form.custoUnit} onChange={set("custoUnit")} />
+              </Field>
+              <Field label="Frete (R$/L)">
+                <Input type="number" step="0.01" value={form.frete} onChange={set("frete")} />
+              </Field>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+              <Field label="ICMS (%)">
+                <Input type="number" step="0.01" value={form.icms} onChange={set("icms")} />
+              </Field>
+              <Field label="PIS (%)">
+                <Input type="number" step="0.01" value={form.pis} onChange={set("pis")} />
+              </Field>
+              <Field label="COFINS (%)">
+                <Input type="number" step="0.01" value={form.cofins} onChange={set("cofins")} />
+              </Field>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
+              <Field label="Tanque destino" required>
+                <Select value={form.tanque} onChange={set("tanque")}>
+                  <option value="">Selecione…</option>
+                  {tanquesAtivos.map((t) => (
+                    <option key={t.id} value={t.nome}>{t.nome}</option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Status">
+                <Select value={form.status} onChange={set("status")}>
+                  {!STATUS_OPTIONS.includes(form.status) && form.status && (
+                    <option value={form.status}>{form.status}</option>
+                  )}
+                  {STATUS_OPTIONS.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
+              <Field label="Lote">
+                <Input value={form.lote} onChange={set("lote")} />
+              </Field>
+              <Field label="Observações">
+                <Input value={form.observacoes} onChange={set("observacoes")} />
+              </Field>
+            </div>
+
+            <Field
+              label="Motivo da alteração"
+              required
+              hint="Obrigatório. Informe de forma objetiva por que o lançamento está sendo corrigido."
+            >
+              <textarea
+                value={motivo}
+                onChange={(e) => setMotivo(e.target.value)}
+                rows={3}
+                placeholder="Ex.: correção da tara informada no lançamento original."
+                style={{
+                  ...inputBase,
+                  resize: "vertical",
+                  minHeight: 74,
+                  fontFamily: "inherit",
+                }}
+              />
+            </Field>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginTop: 16,
+              paddingTop: 16,
+              borderTop: `1px solid ${C.border}`,
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <div>
+              <span style={{ fontFamily: MONO, fontSize: 13, color: C.textDim }}>
+                Valor total:{" "}
+                <strong style={{ color: C.accent }}>{fmtR(calc.valorTotal)}</strong>
+              </span>
+              <div
+                style={{
+                  marginTop: 4,
+                  color: alteracoes.length > 0 ? C.steel : C.textFaint,
+                  fontSize: 11.5,
+                }}
+              >
+                {alteracoes.length === 0
+                  ? "Nenhum campo foi alterado."
+                  : `${alteracoes.length} campo${alteracoes.length === 1 ? "" : "s"} alterado${alteracoes.length === 1 ? "" : "s"}.`}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+              <Btn
+                onClick={() => {
+                  if (!podeRevisar) return;
+                  setShowReview(true);
+                }}
+                style={
+                  !podeRevisar
+                    ? { opacity: 0.4, pointerEvents: "none" }
+                    : {}
+                }
+              >
+                <Eye size={14} /> Revisar alterações
+              </Btn>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {showReview && (
+        <ConfirmacaoEdicaoCargaModal
+          row={row}
+          alteracoes={alteracoes}
+          motivo={motivo}
+          adminProfile={adminProfile}
+          onClose={() => setShowReview(false)}
+          onConfirm={confirmarAlteracoes}
+        />
+      )}
+    </>
+  );
+}
+
+function ConfirmacaoEdicaoCargaModal({
+  row,
+  alteracoes,
+  motivo,
+  adminProfile,
+  onClose,
+  onConfirm,
+}) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 180,
+        background: "rgba(0,0,0,.82)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 18,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: 720,
+          maxWidth: "100%",
+          maxHeight: "86vh",
+          overflowY: "auto",
+          background: C.panel,
+          border: `1px solid ${C.borderLight}`,
+          borderRadius: 8,
+          boxShadow: "0 28px 80px rgba(0,0,0,.5)",
+        }}
+      >
+        <div
+          style={{
+            padding: "18px 20px",
+            borderBottom: `1px solid ${C.border}`,
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: 14,
+          }}
+        >
+          <div>
+            <div
+              style={{
+                color: C.accent,
+                fontFamily: MONO,
+                fontSize: 10.5,
+                letterSpacing: ".08em",
+                textTransform: "uppercase",
+                marginBottom: 5,
+              }}
+            >
+              Auditoria da correção
+            </div>
+            <div
+              style={{
+                color: C.text,
+                fontFamily: DISPLAY,
+                fontWeight: 800,
+                fontSize: 22,
+                textTransform: "uppercase",
+              }}
+            >
+              Confirmar alterações
+            </div>
+            <div style={{ color: C.textDim, fontSize: 12.5, marginTop: 5 }}>
+              NF {row.notaFiscal || "—"} · {row.placa || "—"}
+            </div>
+          </div>
+
+          <button
+            onClick={onClose}
+            style={{
+              background: "none",
+              border: "none",
+              color: C.textDim,
+              cursor: "pointer",
+              padding: 4,
+            }}
+          >
             <X size={18} />
           </button>
         </div>
 
-        <div style={{ display: "grid", gap: 14, maxHeight: "65vh", overflowY: "auto", paddingRight: 4 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
-            <Field label="Data" required><Input type="date" value={form.data} onChange={set("data")} /></Field>
-            <Field label="Chegada"><Input type="time" value={form.chegada} onChange={set("chegada")} /></Field>
-            <Field label="Saída"><Input type="time" value={form.saida} onChange={set("saida")} /></Field>
+        <div style={{ padding: 20 }}>
+          <div
+            style={{
+              background: "#1B2530",
+              border: `1px solid ${C.steel}44`,
+              borderRadius: 5,
+              padding: "11px 13px",
+              marginBottom: 16,
+              fontSize: 12.5,
+              lineHeight: 1.5,
+            }}
+          >
+            <div style={{ color: C.textDim }}>
+              <strong style={{ color: C.steel }}>Responsável:</strong>{" "}
+              {adminProfile || "Administrador"}
+            </div>
+            <div style={{ color: C.textDim, marginTop: 5 }}>
+              <strong style={{ color: C.steel }}>Motivo:</strong> {motivo.trim()}
+            </div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
-            <Field label="Placa carreta" required>
-              <Select value={form.placa} onChange={set("placa")}>
-                <option value="">Selecione…</option>
-                {cadastros.veiculos.map((v) => <option key={v.id} value={v.placa}>{v.placa}</option>)}
-              </Select>
-            </Field>
-            <Field label="Nota fiscal"><Input value={form.notaFiscal} onChange={set("notaFiscal")} /></Field>
+          <div
+            style={{
+              color: C.textFaint,
+              fontSize: 10.5,
+              textTransform: "uppercase",
+              letterSpacing: ".08em",
+              marginBottom: 8,
+            }}
+          >
+            Campos que serão alterados ({alteracoes.length})
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
-            <Field label="Motorista">
-              <Select value={form.motorista} onChange={set("motorista")}>
-                <option value="">Selecione…</option>
-                {motoristasAtivos.map((m) => <option key={m.id} value={m.nome}>{m.nome}</option>)}
-              </Select>
-            </Field>
-            <Field label="Fornecedor">
-              <Select value={form.fornecedor} onChange={set("fornecedor")}>
-                <option value="">Selecione…</option>
-                {fornecedoresAtivos.map((f) => <option key={f.id} value={f.nome}>{f.nome}</option>)}
-              </Select>
-            </Field>
+          <div
+            style={{
+              border: `1px solid ${C.border}`,
+              borderRadius: 5,
+              overflow: "hidden",
+            }}
+          >
+            {alteracoes.map((a, index) => (
+              <div
+                key={`${a.campo}-${index}`}
+                style={{
+                  padding: "11px 13px",
+                  background: index % 2 === 0 ? C.panelAlt : C.panel,
+                  borderBottom:
+                    index < alteracoes.length - 1
+                      ? `1px solid ${C.border}`
+                      : "none",
+                }}
+              >
+                <div
+                  style={{
+                    color: C.text,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    marginBottom: 7,
+                  }}
+                >
+                  {a.label}
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr auto 1fr",
+                    gap: 10,
+                    alignItems: "center",
+                  }}
+                >
+                  <div>
+                    <div
+                      style={{
+                        color: C.textFaint,
+                        fontSize: 9.5,
+                        textTransform: "uppercase",
+                        marginBottom: 3,
+                      }}
+                    >
+                      Antes
+                    </div>
+                    <div style={{ color: C.red, fontSize: 12.5, wordBreak: "break-word" }}>
+                      {a.anterior}
+                    </div>
+                  </div>
+
+                  <ArrowRight size={14} color={C.textFaint} />
+
+                  <div>
+                    <div
+                      style={{
+                        color: C.textFaint,
+                        fontSize: 9.5,
+                        textTransform: "uppercase",
+                        marginBottom: 3,
+                      }}
+                    >
+                      Depois
+                    </div>
+                    <div style={{ color: C.green, fontSize: 12.5, wordBreak: "break-word" }}>
+                      {a.novo}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
-            <Field label="Produto" required>
-              <Select value={form.produto} onChange={set("produto")}>
-                <option value="">Selecione…</option>
-                {produtosAtivos.map((p) => <option key={p.id} value={p.nome}>{p.nome}</option>)}
-              </Select>
-            </Field>
-            <Field label="API"><Input type="number" value={form.api} onChange={set("api")} /></Field>
-            <Field label="Ofertado NF (L)" required><Input type="number" value={form.ofertado} onChange={set("ofertado")} /></Field>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
-            <Field label="Peso bruto (kg)" required><Input type="number" value={form.pesoBruto} onChange={set("pesoBruto")} /></Field>
-            <Field label="Drenagem água (L)"><Input type="number" value={form.drenagem} onChange={set("drenagem")} /></Field>
-            <Field label="Tara (kg)" required><Input type="number" value={form.tara} onChange={set("tara")} /></Field>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
-            <Field label="Densidade 20º" required><Input type="number" step="0.001" value={form.densidade} onChange={set("densidade")} /></Field>
-            <Field label="BS&W (%)"><Input type="number" step="0.01" value={form.bsw} onChange={set("bsw")} /></Field>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
-            <Field label="Custo unitário (R$/L)"><Input type="number" step="0.01" value={form.custoUnit} onChange={set("custoUnit")} /></Field>
-            <Field label="Frete (R$/L)"><Input type="number" step="0.01" value={form.frete} onChange={set("frete")} /></Field>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
-            <Field label="ICMS (%)"><Input type="number" step="0.01" value={form.icms} onChange={set("icms")} /></Field>
-            <Field label="PIS (%)"><Input type="number" step="0.01" value={form.pis} onChange={set("pis")} /></Field>
-            <Field label="COFINS (%)"><Input type="number" step="0.01" value={form.cofins} onChange={set("cofins")} /></Field>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
-            <Field label="Tanque destino" required>
-              <Select value={form.tanque} onChange={set("tanque")}>
-                <option value="">Selecione…</option>
-                {tanquesAtivos.map((t) => <option key={t.id} value={t.nome}>{t.nome}</option>)}
-              </Select>
-            </Field>
-            <Field label="Status">
-              <Select value={form.status} onChange={set("status")}>
-                {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-              </Select>
-            </Field>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
-            <Field label="Lote"><Input value={form.lote} onChange={set("lote")} /></Field>
-            <Field label="Observações"><Input value={form.observacoes} onChange={set("observacoes")} /></Field>
+          <div
+            style={{
+              marginTop: 16,
+              background: C.yellowBg,
+              border: `1px solid ${C.yellow}55`,
+              color: C.yellow,
+              borderRadius: 5,
+              padding: "10px 12px",
+              fontSize: 12,
+              lineHeight: 1.5,
+            }}
+          >
+            Depois de confirmar, a correção será salva e adicionada ao histórico
+            interno deste lançamento.
           </div>
         </div>
 
-        <div style={{
-          display: "flex", justifyContent: "space-between", alignItems: "center",
-          marginTop: 16, paddingTop: 16, borderTop: `1px solid ${C.border}`,
-        }}>
-          <span style={{ fontFamily: MONO, fontSize: 13, color: C.textDim }}>
-            Valor total: <strong style={{ color: C.accent }}>{fmtR(calc.valorTotal)}</strong>
-          </span>
-          <div style={{ display: "flex", gap: 8 }}>
-            <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
-            <Btn onClick={() => {
-              if (!requiredOk) return;
-              const fornecedorSelecionado = cadastros.fornecedores.find((f) => f.nome === form.fornecedor);
-              onSave({ ...form, cnpj: fornecedorSelecionado?.cnpj || form.cnpj || "" });
-            }} style={!requiredOk ? { opacity: 0.4, pointerEvents: "none" } : {}}>
-              <Check size={14} /> Salvar alterações
-            </Btn>
-          </div>
+        <div
+          style={{
+            padding: "14px 20px",
+            borderTop: `1px solid ${C.border}`,
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          <Btn variant="ghost" onClick={onClose}>
+            <ArrowLeft size={14} /> Voltar e corrigir
+          </Btn>
+          <Btn onClick={onConfirm}>
+            <Check size={14} /> Confirmar alterações
+          </Btn>
         </div>
       </div>
     </div>

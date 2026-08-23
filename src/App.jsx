@@ -3739,6 +3739,7 @@ function Historico({
   const [monthFilter, setMonthFilter] = useState("todos");
   const [query, setQuery] = useState("");
   const [editingRow, setEditingRow] = useState(null);
+  const [viewingAlteracoesRow, setViewingAlteracoesRow] = useState(null);
   const [showReport, setShowReport] = useState(false);
 
   const cargas = tipoHistorico === "entrada" ? cargasEntrada : cargasSaida;
@@ -3751,6 +3752,7 @@ function Historico({
     setMonthFilter("todos");
     setQuery("");
     setEditingRow(null);
+    setViewingAlteracoesRow(null);
   };
 
   const months = useMemo(() => {
@@ -3904,6 +3906,45 @@ function Historico({
                     </td>
                     {isAdmin && (
                       <td style={{ ...td, display: "flex", gap: 4 }}>
+                        {Array.isArray(row.historicoAlteracoes) &&
+                          row.historicoAlteracoes.length > 0 && (
+                            <button
+                              onClick={() => setViewingAlteracoesRow(row)}
+                              title={`Ver alterações (${row.historicoAlteracoes.length})`}
+                              style={{
+                                background: "none",
+                                border: "none",
+                                cursor: "pointer",
+                                color: C.steel,
+                                padding: 4,
+                                position: "relative",
+                              }}
+                              onMouseEnter={(e) => (e.currentTarget.style.color = C.accent)}
+                              onMouseLeave={(e) => (e.currentTarget.style.color = C.steel)}
+                            >
+                              <Eye size={14} />
+                              <span
+                                style={{
+                                  position: "absolute",
+                                  top: -4,
+                                  right: -5,
+                                  minWidth: 14,
+                                  height: 14,
+                                  padding: "0 3px",
+                                  borderRadius: 8,
+                                  background: C.accent,
+                                  color: "#111",
+                                  fontSize: 8.5,
+                                  fontWeight: 800,
+                                  lineHeight: "14px",
+                                  textAlign: "center",
+                                }}
+                              >
+                                {row.historicoAlteracoes.length}
+                              </span>
+                            </button>
+                          )}
+
                         <button onClick={() => setEditingRow(row)} title="Editar"
                           style={{ background: "none", border: "none", cursor: "pointer", color: C.textFaint, padding: 4 }}
                           onMouseEnter={(e) => (e.currentTarget.style.color = C.accent)}
@@ -3948,10 +3989,367 @@ function Historico({
           onSave={(updated) => { onUpdate(updated); setEditingRow(null); }}
         />
       )}
+
+      {viewingAlteracoesRow && (
+        <HistoricoAlteracoesCargaModal
+          row={viewingAlteracoesRow}
+          onClose={() => setViewingAlteracoesRow(null)}
+        />
+      )}
     </div>
   );
 }
 const td = { padding: "9px 12px", whiteSpace: "nowrap" };
+
+
+function HistoricoAlteracoesCargaModal({ row, onClose }) {
+  const historico = Array.isArray(row.historicoAlteracoes)
+    ? [...row.historicoAlteracoes].sort((a, b) =>
+        String(a.data || "") < String(b.data || "") ? 1 : -1
+      )
+    : [];
+
+  const formatarDataHora = (value) => {
+    if (!value) return "—";
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return String(value);
+
+    return d.toLocaleString("pt-BR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 190,
+        background: "rgba(0,0,0,.82)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 18,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: 820,
+          maxWidth: "100%",
+          maxHeight: "88vh",
+          overflowY: "auto",
+          background: C.panel,
+          border: `1px solid ${C.borderLight}`,
+          borderRadius: 8,
+          boxShadow: "0 28px 80px rgba(0,0,0,.5)",
+        }}
+      >
+        <div
+          style={{
+            padding: "18px 20px",
+            borderBottom: `1px solid ${C.border}`,
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: 14,
+          }}
+        >
+          <div>
+            <div
+              style={{
+                color: C.accent,
+                fontFamily: MONO,
+                fontSize: 10.5,
+                letterSpacing: ".08em",
+                textTransform: "uppercase",
+                marginBottom: 5,
+              }}
+            >
+              Rastreabilidade do lançamento
+            </div>
+
+            <div
+              style={{
+                color: C.text,
+                fontFamily: DISPLAY,
+                fontWeight: 800,
+                fontSize: 22,
+                textTransform: "uppercase",
+              }}
+            >
+              Histórico de alterações
+            </div>
+
+            <div style={{ color: C.textDim, fontSize: 12.5, marginTop: 5 }}>
+              NF {row.notaFiscal || "—"} · {row.placa || "—"} ·{" "}
+              {row.data ? row.data.split("-").reverse().join("/") : "—"}
+            </div>
+          </div>
+
+          <button
+            onClick={onClose}
+            title="Fechar"
+            style={{
+              background: "none",
+              border: "none",
+              color: C.textDim,
+              cursor: "pointer",
+              padding: 4,
+            }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div style={{ padding: 20 }}>
+          <div
+            style={{
+              background: "#1B2530",
+              border: `1px solid ${C.steel}44`,
+              borderRadius: 5,
+              padding: "11px 13px",
+              color: C.textDim,
+              fontSize: 12.5,
+              lineHeight: 1.5,
+              marginBottom: 18,
+            }}
+          >
+            Este lançamento possui{" "}
+            <strong style={{ color: C.steel }}>{historico.length}</strong>{" "}
+            alteração{historico.length === 1 ? "" : "ões"} registrada
+            {historico.length === 1 ? "" : "s"}. As alterações mais recentes
+            aparecem primeiro.
+          </div>
+
+          {historico.length === 0 ? (
+            <div
+              style={{
+                textAlign: "center",
+                padding: "34px 0",
+                color: C.textDim,
+                fontSize: 13,
+              }}
+            >
+              Nenhuma alteração registrada para esta carga.
+            </div>
+          ) : (
+            <div style={{ display: "grid", gap: 14 }}>
+              {historico.map((registro, index) => (
+                <div
+                  key={registro.id || `${registro.data}-${index}`}
+                  style={{
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 6,
+                    overflow: "hidden",
+                  }}
+                >
+                  <div
+                    style={{
+                      padding: "12px 14px",
+                      background: C.panelAlt,
+                      borderBottom: `1px solid ${C.border}`,
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "flex-start",
+                      gap: 12,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div>
+                      <div
+                        style={{
+                          color: C.accent,
+                          fontFamily: MONO,
+                          fontSize: 10,
+                          letterSpacing: ".06em",
+                          textTransform: "uppercase",
+                          marginBottom: 4,
+                        }}
+                      >
+                        Alteração {String(historico.length - index).padStart(2, "0")}
+                      </div>
+                      <div style={{ color: C.text, fontSize: 13, fontWeight: 700 }}>
+                        {registro.perfil || "Administrador"}
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        color: C.textDim,
+                        fontFamily: MONO,
+                        fontSize: 11.5,
+                      }}
+                    >
+                      {formatarDataHora(registro.data)}
+                    </div>
+                  </div>
+
+                  <div style={{ padding: "13px 14px" }}>
+                    <div
+                      style={{
+                        background: C.panelAlt,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 5,
+                        padding: "9px 11px",
+                        marginBottom: 12,
+                      }}
+                    >
+                      <div
+                        style={{
+                          color: C.textFaint,
+                          fontSize: 9.5,
+                          textTransform: "uppercase",
+                          letterSpacing: ".06em",
+                          marginBottom: 4,
+                        }}
+                      >
+                        Motivo da alteração
+                      </div>
+                      <div
+                        style={{
+                          color: C.text,
+                          fontSize: 12.5,
+                          lineHeight: 1.5,
+                          whiteSpace: "pre-wrap",
+                        }}
+                      >
+                        {registro.motivo || "—"}
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        color: C.textFaint,
+                        fontSize: 9.5,
+                        textTransform: "uppercase",
+                        letterSpacing: ".06em",
+                        marginBottom: 7,
+                      }}
+                    >
+                      Campos alterados ({Array.isArray(registro.campos) ? registro.campos.length : 0})
+                    </div>
+
+                    <div
+                      style={{
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 5,
+                        overflow: "hidden",
+                      }}
+                    >
+                      {(Array.isArray(registro.campos) ? registro.campos : []).map(
+                        (campo, campoIndex) => (
+                          <div
+                            key={`${campo.campo || campo.label}-${campoIndex}`}
+                            style={{
+                              padding: "10px 12px",
+                              background:
+                                campoIndex % 2 === 0 ? C.panelAlt : C.panel,
+                              borderBottom:
+                                campoIndex <
+                                (registro.campos?.length || 0) - 1
+                                  ? `1px solid ${C.border}`
+                                  : "none",
+                            }}
+                          >
+                            <div
+                              style={{
+                                color: C.text,
+                                fontSize: 11.5,
+                                fontWeight: 700,
+                                marginBottom: 6,
+                              }}
+                            >
+                              {campo.label || campo.campo || "Campo"}
+                            </div>
+
+                            <div
+                              style={{
+                                display: "grid",
+                                gridTemplateColumns: "1fr auto 1fr",
+                                gap: 10,
+                                alignItems: "center",
+                              }}
+                            >
+                              <div>
+                                <div
+                                  style={{
+                                    color: C.textFaint,
+                                    fontSize: 9,
+                                    textTransform: "uppercase",
+                                    marginBottom: 2,
+                                  }}
+                                >
+                                  Antes
+                                </div>
+                                <div
+                                  style={{
+                                    color: C.red,
+                                    fontSize: 12,
+                                    wordBreak: "break-word",
+                                  }}
+                                >
+                                  {campo.anterior ?? "—"}
+                                </div>
+                              </div>
+
+                              <ArrowRight size={13} color={C.textFaint} />
+
+                              <div>
+                                <div
+                                  style={{
+                                    color: C.textFaint,
+                                    fontSize: 9,
+                                    textTransform: "uppercase",
+                                    marginBottom: 2,
+                                  }}
+                                >
+                                  Depois
+                                </div>
+                                <div
+                                  style={{
+                                    color: C.green,
+                                    fontSize: 12,
+                                    wordBreak: "break-word",
+                                  }}
+                                >
+                                  {campo.novo ?? "—"}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div
+          style={{
+            padding: "14px 20px",
+            borderTop: `1px solid ${C.border}`,
+            display: "flex",
+            justifyContent: "flex-end",
+          }}
+        >
+          <Btn variant="ghost" onClick={onClose}>
+            Fechar
+          </Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 
 function RelatorioTxtModal({

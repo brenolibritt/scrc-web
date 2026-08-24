@@ -1415,6 +1415,8 @@ export default function App() {
         {isLaboratorio ? (
           <LaboratorioModulo
             cadastros={cadastros}
+            cargasEntrada={cargas}
+            cargasSaida={cargasSaida}
             onToast={showToast}
           />
         ) : (
@@ -1823,7 +1825,12 @@ function LaboratorioAdminConsulta({ onToast }) {
   );
 }
 
-function LaboratorioModulo({ cadastros, onToast }) {
+function LaboratorioModulo({
+  cadastros,
+  cargasEntrada = [],
+  cargasSaida = [],
+  onToast,
+}) {
   const hoje = new Date().toISOString().slice(0, 10);
 
   const [form, setForm] = useState({
@@ -1841,6 +1848,12 @@ function LaboratorioModulo({ cadastros, onToast }) {
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
 
+  // Consulta somente leitura das cargas já cadastradas.
+  // O Laboratório usa esta lista apenas como referência para identificar
+  // a carga correta. Nenhum dado de Entrada/Saída é alterado por esta área.
+  const [tipoConsultaCarga, setTipoConsultaCarga] = useState("entrada");
+  const [buscaCarga, setBuscaCarga] = useState("");
+
   const veiculosAtivos = useMemo(
     () => (cadastros?.veiculos || []).filter((v) => v.status === "ATIVO"),
     [cadastros]
@@ -1850,6 +1863,59 @@ function LaboratorioModulo({ cadastros, onToast }) {
     () => (cadastros?.produtos || []).filter((p) => p.status === "ATIVO"),
     [cadastros]
   );
+
+  const cargasConsulta = useMemo(() => {
+    const origem =
+      tipoConsultaCarga === "entrada" ? cargasEntrada : cargasSaida;
+
+    const q = buscaCarga.trim().toLowerCase();
+
+    return [...(origem || [])]
+      .filter((carga) => {
+        if (!q) return true;
+
+        return [
+          carga.data,
+          carga.placa,
+          carga.notaFiscal,
+          carga.produto,
+          carga.motorista,
+          carga.fornecedor,
+          carga.status,
+        ]
+          .map((valor) => String(valor ?? "").toLowerCase())
+          .join(" ")
+          .includes(q);
+      })
+      .sort((a, b) => String(b.data || "").localeCompare(String(a.data || "")))
+      .slice(0, 10);
+  }, [tipoConsultaCarga, buscaCarga, cargasEntrada, cargasSaida]);
+
+  const usarCargaComoReferencia = (carga) => {
+    const movimento =
+      tipoConsultaCarga === "entrada" ? "ENTRADA" : "SAIDA";
+
+    setForm((current) => ({
+      ...current,
+      tipo_movimento: movimento,
+      data_referencia: carga.data || current.data_referencia,
+      placa: carga.placa || "",
+      nota_fiscal: carga.notaFiscal || "",
+      produto: carga.produto || current.produto,
+    }));
+
+    onToast?.(
+      "Carga selecionada como referência. Agora informe Temperatura, Densidade e API."
+    );
+  };
+
+  const fmtDataCarga = (value) => {
+    if (!value) return "—";
+    const partes = String(value).split("-");
+    return partes.length === 3
+      ? `${partes[2]}/${partes[1]}/${partes[0]}`
+      : value;
+  };
 
   const carregarAnalises = useCallback(async () => {
     setCarregando(true);
@@ -1956,6 +2022,322 @@ function LaboratorioModulo({ cadastros, onToast }) {
           Informe a carga de referência e os três resultados do Laboratório.
           Estes dados são apenas para consulta dos Administradores e não
           preenchem nem alteram automaticamente os lançamentos de Entrada ou Saída.
+        </div>
+
+        <div
+          style={{
+            marginBottom: 20,
+            border: `1px solid ${C.border}`,
+            borderRadius: 6,
+            background: C.panelAlt,
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              padding: "14px 16px",
+              borderBottom: `1px solid ${C.border}`,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "flex-start",
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontFamily: MONO,
+                  color: C.steel,
+                  fontSize: 10.5,
+                  letterSpacing: ".08em",
+                  textTransform: "uppercase",
+                  marginBottom: 4,
+                }}
+              >
+                Consulta somente leitura
+              </div>
+
+              <div
+                style={{
+                  fontFamily: DISPLAY,
+                  color: C.text,
+                  fontWeight: 800,
+                  fontSize: 18,
+                  textTransform: "uppercase",
+                }}
+              >
+                Cargas cadastradas
+              </div>
+
+              <div
+                style={{
+                  color: C.textDim,
+                  fontSize: 11.5,
+                  marginTop: 4,
+                  lineHeight: 1.45,
+                }}
+              >
+                Consulte as cargas já lançadas e use uma delas como referência.
+                Esta área não permite editar nem alterar cargas.
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <button
+                onClick={() => setTipoConsultaCarga("entrada")}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "7px 10px",
+                  background:
+                    tipoConsultaCarga === "entrada"
+                      ? `${C.accentDim}33`
+                      : "transparent",
+                  border: `1px solid ${
+                    tipoConsultaCarga === "entrada"
+                      ? C.accent
+                      : C.border
+                  }`,
+                  color:
+                    tipoConsultaCarga === "entrada"
+                      ? C.accent
+                      : C.textDim,
+                  borderRadius: 4,
+                  cursor: "pointer",
+                  fontSize: 11.5,
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                }}
+              >
+                <Plus size={12} />
+                Entradas ({cargasEntrada.length})
+              </button>
+
+              <button
+                onClick={() => setTipoConsultaCarga("saida")}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "7px 10px",
+                  background:
+                    tipoConsultaCarga === "saida"
+                      ? `${C.accentDim}33`
+                      : "transparent",
+                  border: `1px solid ${
+                    tipoConsultaCarga === "saida"
+                      ? C.accent
+                      : C.border
+                  }`,
+                  color:
+                    tipoConsultaCarga === "saida"
+                      ? C.accent
+                      : C.textDim,
+                  borderRadius: 4,
+                  cursor: "pointer",
+                  fontSize: 11.5,
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                }}
+              >
+                <Truck size={12} />
+                Saídas ({cargasSaida.length})
+              </button>
+            </div>
+          </div>
+
+          <div style={{ padding: 14 }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr",
+                gap: 10,
+                marginBottom: 12,
+              }}
+            >
+              <Field label="Buscar carga">
+                <div style={{ position: "relative" }}>
+                  <Search
+                    size={14}
+                    color={C.textFaint}
+                    style={{
+                      position: "absolute",
+                      left: 10,
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      pointerEvents: "none",
+                    }}
+                  />
+                  <Input
+                    value={buscaCarga}
+                    onChange={(e) => setBuscaCarga(e.target.value)}
+                    placeholder="Data, placa, NF, produto, motorista, fornecedor..."
+                    style={{ paddingLeft: 32 }}
+                  />
+                </div>
+              </Field>
+            </div>
+
+            {cargasConsulta.length === 0 ? (
+              <div
+                style={{
+                  padding: "22px 12px",
+                  textAlign: "center",
+                  color: C.textDim,
+                  fontSize: 12.5,
+                  border: `1px dashed ${C.borderLight}`,
+                  borderRadius: 5,
+                  background: C.panel,
+                }}
+              >
+                Nenhuma carga encontrada nesta consulta.
+              </div>
+            ) : (
+              <div
+                style={{
+                  display: "grid",
+                  gap: 8,
+                  maxHeight: 330,
+                  overflowY: "auto",
+                  paddingRight: 2,
+                }}
+              >
+                {cargasConsulta.map((carga, index) => (
+                  <div
+                    key={carga.id || `${carga.data}-${carga.placa}-${index}`}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr auto",
+                      gap: 12,
+                      alignItems: "center",
+                      background: C.panel,
+                      border: `1px solid ${C.border}`,
+                      borderRadius: 5,
+                      padding: "11px 12px",
+                    }}
+                    className="scrc-grid"
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 10,
+                          alignItems: "center",
+                          flexWrap: "wrap",
+                          marginBottom: 6,
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontFamily: MONO,
+                            color: C.accent,
+                            fontSize: 11,
+                            fontWeight: 700,
+                          }}
+                        >
+                          {fmtDataCarga(carga.data)}
+                        </span>
+
+                        <span
+                          style={{
+                            fontFamily: MONO,
+                            color: C.text,
+                            fontSize: 12.5,
+                            fontWeight: 700,
+                          }}
+                        >
+                          {carga.placa || "Placa não informada"}
+                        </span>
+
+                        <Pill
+                          text={
+                            tipoConsultaCarga === "entrada"
+                              ? "Entrada"
+                              : "Saída"
+                          }
+                          fg={
+                            tipoConsultaCarga === "entrada"
+                              ? C.steel
+                              : C.green
+                          }
+                          bg={
+                            tipoConsultaCarga === "entrada"
+                              ? "#1B2530"
+                              : C.greenBg
+                          }
+                        />
+                      </div>
+
+                      <div
+                        style={{
+                          color: C.textDim,
+                          fontSize: 11.5,
+                          lineHeight: 1.55,
+                        }}
+                      >
+                        NF:{" "}
+                        <strong style={{ color: C.text }}>
+                          {carga.notaFiscal || "—"}
+                        </strong>
+                        {"  •  "}
+                        Produto:{" "}
+                        <strong style={{ color: C.text }}>
+                          {carga.produto || "—"}
+                        </strong>
+                      </div>
+
+                      <div
+                        style={{
+                          color: C.textFaint,
+                          fontSize: 10.8,
+                          lineHeight: 1.5,
+                          marginTop: 3,
+                        }}
+                      >
+                        Motorista: {carga.motorista || "—"}
+                        {"  •  "}
+                        Fornecedor: {carga.fornecedor || "—"}
+                        {"  •  "}
+                        Status: {carga.status || "—"}
+                      </div>
+                    </div>
+
+                    <Btn
+                      variant="ghost"
+                      onClick={() => usarCargaComoReferencia(carga)}
+                      style={{
+                        whiteSpace: "nowrap",
+                        color: C.steel,
+                        borderColor: `${C.steel}66`,
+                      }}
+                    >
+                      <Check size={13} />
+                      Usar como referência
+                    </Btn>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {(tipoConsultaCarga === "entrada"
+              ? cargasEntrada.length
+              : cargasSaida.length) > 10 &&
+              !buscaCarga.trim() && (
+                <div
+                  style={{
+                    marginTop: 8,
+                    color: C.textFaint,
+                    fontSize: 10.5,
+                    textAlign: "right",
+                  }}
+                >
+                  Exibindo as 10 cargas mais recentes. Use a busca para localizar
+                  registros mais antigos.
+                </div>
+              )}
+          </div>
         </div>
 
         <div style={{ display: "grid", gap: 16 }}>

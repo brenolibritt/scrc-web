@@ -1851,6 +1851,8 @@ function LaboratorioModulo({
   const [salvando, setSalvando] = useState(false);
   const [analiseEditando, setAnaliseEditando] = useState(null);
   const [editandoAnalise, setEditandoAnalise] = useState(false);
+  const [analiseExcluindo, setAnaliseExcluindo] = useState(null);
+  const [excluindoAnalise, setExcluindoAnalise] = useState(false);
 
   // Consulta somente leitura das cargas já cadastradas.
   // O Laboratório usa esta lista apenas como referência para identificar
@@ -2046,6 +2048,40 @@ function LaboratorioModulo({
       );
     } finally {
       setEditandoAnalise(false);
+    }
+  };
+
+  const excluirAnaliseLaboratorio = async () => {
+    if (!analiseExcluindo || excluindoAnalise) return;
+    setExcluindoAnalise(true);
+
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+
+      const userId = userData?.user?.id;
+      if (!userId) throw new Error("Sessão do Laboratório não encontrada.");
+
+      const { error } = await supabase
+        .from("scrc_laboratorio")
+        .delete()
+        .eq("id", analiseExcluindo.id)
+        .eq("user_id", userId);
+
+      if (error) throw error;
+
+      setAnaliseExcluindo(null);
+      onToast?.("Análise laboratorial excluída com sucesso.");
+      await carregarAnalises();
+    } catch (error) {
+      console.error("Erro ao excluir análise laboratorial:", error);
+      onToast?.(
+        "Não foi possível excluir a análise: " +
+          (error?.message || "erro desconhecido"),
+        "err"
+      );
+    } finally {
+      setExcluindoAnalise(false);
     }
   };
 
@@ -2655,31 +2691,46 @@ function LaboratorioModulo({
                     </td>
                     <td style={{ ...labTd, textAlign: "center" }}>
                       {!a.conferido ? (
-                        <button
-                          onClick={() => setAnaliseEditando(a)}
-                          title="Corrigir resultados da análise"
-                          style={{
-                            background: "transparent",
-                            border: "none",
-                            color: C.steel,
-                            cursor: "pointer",
-                            padding: 5,
-                            borderRadius: 4,
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.color = C.accent;
-                            e.currentTarget.style.background = C.panelAlt;
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.color = C.steel;
-                            e.currentTarget.style.background = "transparent";
-                          }}
-                        >
-                          <Pencil size={14} />
-                        </button>
+                        <div style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+                          <button
+                            onClick={() => setAnaliseEditando(a)}
+                            title="Corrigir resultados da análise"
+                            style={{
+                              background: "transparent", border: "none", color: C.steel,
+                              cursor: "pointer", padding: 5, borderRadius: 4,
+                              display: "inline-flex", alignItems: "center", justifyContent: "center",
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.color = C.accent;
+                              e.currentTarget.style.background = C.panelAlt;
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.color = C.steel;
+                              e.currentTarget.style.background = "transparent";
+                            }}
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            onClick={() => setAnaliseExcluindo(a)}
+                            title="Excluir análise"
+                            style={{
+                              background: "transparent", border: "none", color: C.textFaint,
+                              cursor: "pointer", padding: 5, borderRadius: 4,
+                              display: "inline-flex", alignItems: "center", justifyContent: "center",
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.color = C.red;
+                              e.currentTarget.style.background = C.redBg;
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.color = C.textFaint;
+                              e.currentTarget.style.background = "transparent";
+                            }}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       ) : (
                         <span
                           title="Análise já conferida pelo Administrador"
@@ -2700,6 +2751,78 @@ function LaboratorioModulo({
           </div>
         )}
       </Card>
+
+      {analiseExcluindo && (
+        <div
+          onClick={() => !excluindoAnalise && setAnaliseExcluindo(null)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 220,
+            background: "rgba(0,0,0,.82)", display: "flex",
+            alignItems: "center", justifyContent: "center", padding: 18,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 520, maxWidth: "100%", background: C.panel,
+              border: `1px solid ${C.borderLight}`, borderRadius: 8,
+              boxShadow: "0 28px 80px rgba(0,0,0,.50)",
+            }}
+          >
+            <div style={{ padding: "18px 20px", borderBottom: `1px solid ${C.border}` }}>
+              <div style={{
+                color: C.red, fontFamily: MONO, fontSize: 10.5,
+                letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 5,
+              }}>
+                Exclusão de análise
+              </div>
+              <div style={{
+                color: C.text, fontFamily: DISPLAY, fontSize: 22,
+                fontWeight: 800, textTransform: "uppercase",
+              }}>
+                Excluir análise laboratorial?
+              </div>
+            </div>
+
+            <div style={{ padding: 20, color: C.textDim, fontSize: 12.5, lineHeight: 1.6 }}>
+              A análise de <strong style={{ color: C.text }}>{analiseExcluindo.placa || "esta carga"}</strong>
+              {analiseExcluindo.nota_fiscal ? <> · NF <strong style={{ color: C.text }}>{analiseExcluindo.nota_fiscal}</strong></> : null}
+              {" "}será apagada definitivamente.
+              <div style={{
+                marginTop: 14, padding: "10px 12px", background: C.redBg,
+                border: `1px solid ${C.red}55`, borderRadius: 5, color: C.red,
+              }}>
+                Esta ação não pode ser desfeita.
+              </div>
+            </div>
+
+            <div style={{
+              padding: "14px 20px", borderTop: `1px solid ${C.border}`,
+              display: "flex", justifyContent: "flex-end", gap: 10,
+            }}>
+              <Btn
+                variant="ghost"
+                onClick={() => setAnaliseExcluindo(null)}
+                disabled={excluindoAnalise}
+              >
+                Cancelar
+              </Btn>
+              <button
+                onClick={excluirAnaliseLaboratorio}
+                disabled={excluindoAnalise}
+                style={{
+                  border: `1px solid ${C.red}`, background: C.red,
+                  color: "#fff", borderRadius: 5, padding: "9px 14px",
+                  fontFamily: DISPLAY, fontWeight: 800, cursor: excluindoAnalise ? "default" : "pointer",
+                  opacity: excluindoAnalise ? .6 : 1,
+                }}
+              >
+                {excluindoAnalise ? "EXCLUINDO…" : "EXCLUIR ANÁLISE"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {analiseEditando && (
         <EditarAnaliseLaboratorioModal

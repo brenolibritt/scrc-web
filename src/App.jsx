@@ -1592,46 +1592,7 @@ function LaboratorioAdminConsulta({ onToast }) {
     }
   };
 
-  const salvarEdicaoAnalise = async (valores) => {
-    if (!analiseEditando || editandoAnalise) return;
 
-    setEditandoAnalise(true);
-
-    try {
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError) throw userError;
-
-      const userId = userData?.user?.id;
-      if (!userId) {
-        throw new Error("Sessão do Laboratório não encontrada.");
-      }
-
-      const { error } = await supabase
-        .from("scrc_laboratorio")
-        .update({
-          temperatura: num(valores.temperatura),
-          densidade: num(valores.densidade),
-          api: num(valores.api),
-        })
-        .eq("id", analiseEditando.id)
-        .eq("user_id", userId);
-
-      if (error) throw error;
-
-      setAnaliseEditando(null);
-      onToast?.("Análise laboratorial corrigida com sucesso.");
-      await carregarAnalises();
-    } catch (error) {
-      console.error("Erro ao corrigir análise laboratorial:", error);
-      onToast?.(
-        "Não foi possível corrigir a análise: " +
-          (error?.message || "erro desconhecido"),
-        "err"
-      );
-    } finally {
-      setEditandoAnalise(false);
-    }
-  };
 
   return (
     <div style={{ display: "grid", gap: 18 }}>
@@ -2039,6 +2000,52 @@ function LaboratorioModulo({
       return new Date(value).toLocaleString("pt-BR");
     } catch (_) {
       return value;
+    }
+  };
+
+  const salvarEdicaoAnalise = async (valores) => {
+    if (!analiseEditando || editandoAnalise) return;
+
+    setEditandoAnalise(true);
+
+    try {
+      const { data: userData, error: userError } =
+        await supabase.auth.getUser();
+
+      if (userError) throw userError;
+
+      const userId = userData?.user?.id;
+
+      if (!userId) {
+        throw new Error("Sessão do Laboratório não encontrada.");
+      }
+
+      const { error } = await supabase
+        .from("scrc_laboratorio")
+        .update({
+          temperatura: num(valores.temperatura),
+          densidade: num(valores.densidade),
+          api: num(valores.api),
+        })
+        .eq("id", analiseEditando.id)
+        .eq("user_id", userId);
+
+      if (error) throw error;
+
+      setAnaliseEditando(null);
+      onToast?.("Análise laboratorial corrigida com sucesso.");
+
+      await carregarAnalises();
+    } catch (error) {
+      console.error("Erro ao corrigir análise laboratorial:", error);
+
+      onToast?.(
+        "Não foi possível corrigir a análise: " +
+          (error?.message || "erro desconhecido"),
+        "err"
+      );
+    } finally {
+      setEditandoAnalise(false);
     }
   };
 

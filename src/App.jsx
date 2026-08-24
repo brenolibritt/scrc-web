@@ -1592,6 +1592,47 @@ function LaboratorioAdminConsulta({ onToast }) {
     }
   };
 
+  const salvarEdicaoAnalise = async (valores) => {
+    if (!analiseEditando || editandoAnalise) return;
+
+    setEditandoAnalise(true);
+
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+
+      const userId = userData?.user?.id;
+      if (!userId) {
+        throw new Error("Sessão do Laboratório não encontrada.");
+      }
+
+      const { error } = await supabase
+        .from("scrc_laboratorio")
+        .update({
+          temperatura: num(valores.temperatura),
+          densidade: num(valores.densidade),
+          api: num(valores.api),
+        })
+        .eq("id", analiseEditando.id)
+        .eq("user_id", userId);
+
+      if (error) throw error;
+
+      setAnaliseEditando(null);
+      onToast?.("Análise laboratorial corrigida com sucesso.");
+      await carregarAnalises();
+    } catch (error) {
+      console.error("Erro ao corrigir análise laboratorial:", error);
+      onToast?.(
+        "Não foi possível corrigir a análise: " +
+          (error?.message || "erro desconhecido"),
+        "err"
+      );
+    } finally {
+      setEditandoAnalise(false);
+    }
+  };
+
   return (
     <div style={{ display: "grid", gap: 18 }}>
       <div>
@@ -1847,6 +1888,8 @@ function LaboratorioModulo({
   const [analises, setAnalises] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
+  const [analiseEditando, setAnaliseEditando] = useState(null);
+  const [editandoAnalise, setEditandoAnalise] = useState(false);
 
   // Consulta somente leitura das cargas já cadastradas.
   // O Laboratório usa esta lista apenas como referência para identificar
@@ -2555,6 +2598,7 @@ function LaboratorioModulo({
                     "API",
                     "Status",
                     "Registrado em",
+                    "Ações",
                   ].map((label) => (
                     <th
                       key={label}
@@ -2602,6 +2646,46 @@ function LaboratorioModulo({
                     <td style={{ ...labTd, whiteSpace: "nowrap" }}>
                       {fmtDataHora(a.created_at)}
                     </td>
+                    <td style={{ ...labTd, textAlign: "center" }}>
+                      {!a.conferido ? (
+                        <button
+                          onClick={() => setAnaliseEditando(a)}
+                          title="Corrigir resultados da análise"
+                          style={{
+                            background: "transparent",
+                            border: "none",
+                            color: C.steel,
+                            cursor: "pointer",
+                            padding: 5,
+                            borderRadius: 4,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.color = C.accent;
+                            e.currentTarget.style.background = C.panelAlt;
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.color = C.steel;
+                            e.currentTarget.style.background = "transparent";
+                          }}
+                        >
+                          <Pencil size={14} />
+                        </button>
+                      ) : (
+                        <span
+                          title="Análise já conferida pelo Administrador"
+                          style={{
+                            color: C.textFaint,
+                            fontSize: 10.5,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          Conferida
+                        </span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -2609,6 +2693,252 @@ function LaboratorioModulo({
           </div>
         )}
       </Card>
+
+      {analiseEditando && (
+        <EditarAnaliseLaboratorioModal
+          analise={analiseEditando}
+          salvando={editandoAnalise}
+          onClose={() => {
+            if (!editandoAnalise) setAnaliseEditando(null);
+          }}
+          onSave={salvarEdicaoAnalise}
+        />
+      )}
+    </div>
+  );
+}
+
+function EditarAnaliseLaboratorioModal({
+  analise,
+  salvando,
+  onClose,
+  onSave,
+}) {
+  const [form, setForm] = useState({
+    temperatura: String(analise?.temperatura ?? ""),
+    densidade: String(analise?.densidade ?? ""),
+    api: String(analise?.api ?? ""),
+  });
+
+  const set = (key) => (event) => {
+    setForm((current) => ({
+      ...current,
+      [key]: event.target.value,
+    }));
+  };
+
+  const valido =
+    String(form.temperatura).trim() &&
+    String(form.densidade).trim() &&
+    String(form.api).trim();
+
+  const dataReferencia = (() => {
+    const value = analise?.data_referencia;
+    if (!value) return "—";
+    const partes = String(value).split("-");
+    return partes.length === 3
+      ? `${partes[2]}/${partes[1]}/${partes[0]}`
+      : value;
+  })();
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 210,
+        background: "rgba(0,0,0,.82)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 18,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: 650,
+          maxWidth: "100%",
+          background: C.panel,
+          border: `1px solid ${C.borderLight}`,
+          borderRadius: 8,
+          boxShadow: "0 28px 80px rgba(0,0,0,.50)",
+        }}
+      >
+        <div
+          style={{
+            padding: "18px 20px",
+            borderBottom: `1px solid ${C.border}`,
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: 14,
+          }}
+        >
+          <div>
+            <div
+              style={{
+                color: C.steel,
+                fontFamily: MONO,
+                fontSize: 10.5,
+                letterSpacing: ".08em",
+                textTransform: "uppercase",
+                marginBottom: 5,
+              }}
+            >
+              Correção de resultado
+            </div>
+
+            <div
+              style={{
+                color: C.text,
+                fontFamily: DISPLAY,
+                fontSize: 22,
+                fontWeight: 800,
+                textTransform: "uppercase",
+              }}
+            >
+              Editar análise laboratorial
+            </div>
+
+            <div
+              style={{
+                color: C.textDim,
+                fontSize: 12,
+                marginTop: 5,
+              }}
+            >
+              Altere somente os resultados que estiverem incorretos.
+            </div>
+          </div>
+
+          <button
+            onClick={onClose}
+            disabled={salvando}
+            title="Fechar"
+            style={{
+              background: "none",
+              border: "none",
+              color: C.textDim,
+              cursor: salvando ? "default" : "pointer",
+              padding: 4,
+              opacity: salvando ? 0.5 : 1,
+            }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div style={{ padding: 20 }}>
+          <div
+            style={{
+              background: "#1B2530",
+              border: `1px solid ${C.steel}44`,
+              borderRadius: 5,
+              padding: "11px 13px",
+              marginBottom: 18,
+              color: C.textDim,
+              fontSize: 12,
+              lineHeight: 1.55,
+            }}
+          >
+            <div>
+              <strong style={{ color: C.steel }}>Carga:</strong>{" "}
+              {analise?.placa || "—"} · NF {analise?.nota_fiscal || "—"}
+            </div>
+            <div style={{ marginTop: 4 }}>
+              <strong style={{ color: C.steel }}>Referência:</strong>{" "}
+              {dataReferencia} · {analise?.tipo_movimento || "—"} ·{" "}
+              {analise?.produto || "—"}
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3,minmax(0,1fr))",
+              gap: 12,
+            }}
+            className="scrc-grid"
+          >
+            <Field label="Temperatura (°C)" required>
+              <Input
+                type="number"
+                step="0.01"
+                value={form.temperatura}
+                onChange={set("temperatura")}
+              />
+            </Field>
+
+            <Field label="Densidade" required>
+              <Input
+                type="number"
+                step="0.0001"
+                value={form.densidade}
+                onChange={set("densidade")}
+              />
+            </Field>
+
+            <Field label="API" required>
+              <Input
+                type="number"
+                step="0.01"
+                value={form.api}
+                onChange={set("api")}
+              />
+            </Field>
+          </div>
+
+          <div
+            style={{
+              marginTop: 16,
+              padding: "10px 12px",
+              background: C.yellowBg,
+              border: `1px solid ${C.yellow}55`,
+              borderRadius: 5,
+              color: C.yellow,
+              fontSize: 11.5,
+              lineHeight: 1.5,
+            }}
+          >
+            A identificação da carga não pode ser alterada nesta edição.
+            Apenas Temperatura, Densidade e API serão corrigidos.
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: "14px 20px",
+            borderTop: `1px solid ${C.border}`,
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          <Btn
+            variant="ghost"
+            onClick={onClose}
+            disabled={salvando}
+            style={{ opacity: salvando ? 0.5 : 1 }}
+          >
+            Cancelar
+          </Btn>
+
+          <Btn
+            onClick={() => onSave(form)}
+            disabled={!valido || salvando}
+            style={{
+              opacity: !valido || salvando ? 0.55 : 1,
+              pointerEvents: !valido || salvando ? "none" : "auto",
+            }}
+          >
+            <Save size={14} />
+            {salvando ? "Salvando…" : "Salvar correção"}
+          </Btn>
+        </div>
+      </div>
     </div>
   );
 }

@@ -2388,6 +2388,41 @@ function LaboratorioModulo({
                         {"  •  "}
                         Status: {carga.status || "—"}
                       </div>
+
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 14,
+                          flexWrap: "wrap",
+                          marginTop: 7,
+                          paddingTop: 7,
+                          borderTop: `1px solid ${C.border}`,
+                          color: C.textDim,
+                          fontSize: 10.8,
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        <span>
+                          Ofertado:{" "}
+                          <strong style={{ color: C.text }}>
+                            {fmtBR(carga.ofertado)} L
+                          </strong>
+                        </span>
+
+                        <span>
+                          Peso bruto:{" "}
+                          <strong style={{ color: C.text }}>
+                            {fmtBR(carga.pesoBruto)} kg
+                          </strong>
+                        </span>
+
+                        <span>
+                          Tara:{" "}
+                          <strong style={{ color: C.text }}>
+                            {fmtBR(carga.tara)} kg
+                          </strong>
+                        </span>
+                      </div>
                     </div>
 
                     <Btn
